@@ -1,5 +1,5 @@
 """Structured pytest execution tool."""
-
+import re
 import json
 import subprocess
 import sys
@@ -7,6 +7,27 @@ import time
 from pathlib import Path
 
 from .base import Tool
+
+_PYTEST_COUNT_PATTERNS = {
+    "passed_count": r"(\d+)\s+passed\b",
+    "failed_count": r"(\d+)\s+failed\b",
+    "error_count": r"(\d+)\s+errors?\b",
+    "skipped_count": r"(\d+)\s+skipped\b",
+    "xfailed_count": r"(\d+)\s+xfailed\b",
+    "xpassed_count": r"(\d+)\s+xpassed\b",
+}
+
+
+def _parse_pytest_counts(output: str) -> dict[str, int]:
+    """Extract test outcome counts from pytest's terminal summary."""
+    counts = {name: 0 for name in _PYTEST_COUNT_PATTERNS}
+
+    for name, pattern in _PYTEST_COUNT_PATTERNS.items():
+        matches = re.findall(pattern, output, flags=re.IGNORECASE)
+        if matches:
+            counts[name] = int(matches[-1])
+
+    return counts
 
 
 class RunTestsTool(Tool):
@@ -93,6 +114,8 @@ class RunTestsTool(Tool):
         if proc.stderr:
             output += f"\n[stderr]\n{proc.stderr}"
 
+        counts = _parse_pytest_counts(output)
+
         if len(output) > 15_000:
             output = (
                 output[:6000]
@@ -105,6 +128,12 @@ class RunTestsTool(Tool):
             "exit_code": proc.returncode,
             "duration_seconds": round(duration, 2),
             "test_path": str(target),
+            "passed_count": counts["passed_count"],
+            "failed_count": counts["failed_count"],
+            "error_count": counts["error_count"],
+            "skipped_count": counts["skipped_count"],
+            "xfailed_count": counts["xfailed_count"],
+            "xpassed_count": counts["xpassed_count"],
             "output": output.strip() or "(no output)",
         }
 

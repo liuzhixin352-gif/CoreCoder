@@ -2,12 +2,29 @@
 
 import json
 
-from corecoder.tools.run_tests import RunTestsTool
+from corecoder.tools.run_tests import RunTestsTool,_parse_pytest_counts
 
 
 def _execute_json(tool: RunTestsTool, **kwargs) -> dict:
     """Execute the tool and decode its JSON response."""
     return json.loads(tool.execute(**kwargs))
+
+def test_parse_pytest_counts():
+    output = (
+        "2 failed, 3 passed, 1 skipped, "
+        "4 errors, 1 xfailed, 1 xpassed in 0.50s"
+    )
+
+    result = _parse_pytest_counts(output)
+
+    assert result == {
+        "passed_count": 3,
+        "failed_count": 2,
+        "error_count": 4,
+        "skipped_count": 1,
+        "xfailed_count": 1,
+        "xpassed_count": 1,
+    }
 
 #路径不存在时，返回结构化error
 def test_run_tests_missing_path(tmp_path):
@@ -34,6 +51,9 @@ def test_run_tests_passing_file(tmp_path):
     assert result["status"] == "passed"
     assert result["exit_code"] == 0
     assert "1 passed" in result["output"]
+    assert result["passed_count"] == 1
+    assert result["failed_count"] == 0
+    assert result["error_count"] == 0
     assert result["duration_seconds"] >= 0
 
 #测试失败时，status=failed、exit_code非0
@@ -51,6 +71,9 @@ def test_run_tests_failing_file(tmp_path):
     assert result["status"] == "failed"
     assert result["exit_code"] != 0
     assert "1 failed" in result["output"]
+    assert result["passed_count"] == 0
+    assert result["failed_count"] == 1
+    assert result["error_count"] == 0
 
 #测试运行过久时，返回timeout
 def test_run_tests_timeout(tmp_path):
