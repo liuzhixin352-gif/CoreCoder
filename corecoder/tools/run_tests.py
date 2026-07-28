@@ -17,6 +17,21 @@ _PYTEST_COUNT_PATTERNS = {
     "xpassed_count": r"(\d+)\s+xpassed\b",
 }
 
+_PYTEST_EXIT_STATUS = {
+    0: "passed",
+    1: "failed",
+    2: "interrupted",
+    3: "internal_error",
+    4: "usage_error",
+    5: "no_tests",
+    6: "warning_limit_exceeded",
+}
+
+
+def _status_from_exit_code(exit_code: int) -> str:
+    """Convert a pytest exit code into a structured status."""
+    return _PYTEST_EXIT_STATUS.get(exit_code, "error")
+
 
 def _parse_pytest_counts(output: str) -> dict[str, int]:
     """Extract test outcome counts from pytest's terminal summary."""
@@ -158,7 +173,7 @@ class RunTestsTool(Tool):
             )
 
         result = {
-            "status": "passed" if proc.returncode == 0 else "failed",
+            "status": _status_from_exit_code(proc.returncode),
             "exit_code": proc.returncode,
             "duration_seconds": round(duration, 2),
             "test_path": str(target),
