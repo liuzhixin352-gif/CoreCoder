@@ -16,7 +16,7 @@ def test_public_api_exports():
     assert Agent is not None
     assert LLM is not None
     assert Config is not None
-    assert len(ALL_TOOLS) == 7
+    assert len(ALL_TOOLS) == 8
 
 
 def test_config_from_env(monkeypatch):
@@ -26,6 +26,9 @@ def test_config_from_env(monkeypatch):
 
 
 def test_config_defaults(monkeypatch):
+    # This test checks code defaults, so local .env settings must not affect it.
+    monkeypatch.setattr("corecoder.config._load_dotenv", lambda: None)
+
     # clear relevant env vars without leaking the change into other tests
     monkeypatch.delenv("CORECODER_MODEL", raising=False)
     monkeypatch.delenv("CORECODER_MAX_TOKENS", raising=False)
