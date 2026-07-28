@@ -8,6 +8,7 @@ from .glob_tool import GlobTool
 from .grep import GrepTool
 from .agent import AgentTool
 from .run_tests import RunTestsTool
+from .repo_map import RepoMapTool
 
 ALL_TOOLS = [
     BashTool(),
@@ -18,6 +19,7 @@ ALL_TOOLS = [
     GrepTool(),
     AgentTool(),
     RunTestsTool(),
+    RepoMapTool(),
 ]
 
 
