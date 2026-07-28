@@ -2,7 +2,7 @@
 
 import json
 
-from corecoder.tools.run_tests import RunTestsTool,_parse_pytest_counts
+from corecoder.tools.run_tests import (RunTestsTool,_parse_failed_tests,_parse_pytest_counts,)
 
 
 def _execute_json(tool: RunTestsTool, **kwargs) -> dict:
@@ -25,7 +25,39 @@ def test_parse_pytest_counts():
         "xfailed_count": 1,
         "xpassed_count": 1,
     }
+def test_parse_failed_tests():
+    output = (
+        "================ short test summary info ================\n"
+        "FAILED tests/test_math.py::test_add - assert 2 == 3\n"
+        "FAILED tests/test_user.py::test_login - AssertionError\n"
+        "2 failed in 0.25s\n"
+    )
 
+    result = _parse_failed_tests(output)
+
+    assert result == [
+        "tests/test_math.py::test_add",
+        "tests/test_user.py::test_login",
+    ]
+def test_parse_failed_tests_restores_missing_file_path(tmp_path):
+    test_file = tmp_path / "test_failing.py"
+    test_file.write_text(
+        "def test_wrong_result():\n"
+        "    assert False\n",
+        encoding="utf-8",
+    )
+
+    output = (
+        "================ short test summary info ================\n"
+        "FAILED ::test_wrong_result - AssertionError\n"
+        "1 failed in 0.25s\n"
+    )
+
+    result = _parse_failed_tests(output, test_file)
+
+    assert result == [
+        f"{test_file}::test_wrong_result",
+    ]
 #路径不存在时，返回结构化error
 def test_run_tests_missing_path(tmp_path):
     tool = RunTestsTool()
@@ -54,6 +86,7 @@ def test_run_tests_passing_file(tmp_path):
     assert result["passed_count"] == 1
     assert result["failed_count"] == 0
     assert result["error_count"] == 0
+    assert result["failed_tests"] == []
     assert result["duration_seconds"] >= 0
 
 #测试失败时，status=failed、exit_code非0
@@ -74,7 +107,10 @@ def test_run_tests_failing_file(tmp_path):
     assert result["passed_count"] == 0
     assert result["failed_count"] == 1
     assert result["error_count"] == 0
-
+    assert len(result["failed_tests"]) == 1
+    assert result["failed_tests"][0].endswith(
+    "test_failing.py::test_wrong_result"
+)
 #测试运行过久时，返回timeout
 def test_run_tests_timeout(tmp_path):
     tool = RunTestsTool()

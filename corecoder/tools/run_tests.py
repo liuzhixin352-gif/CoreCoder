@@ -28,7 +28,40 @@ def _parse_pytest_counts(output: str) -> dict[str, int]:
             counts[name] = int(matches[-1])
 
     return counts
+def _parse_failed_tests(
+    output: str,
+    test_path: str | Path | None = None,
+) -> list[str]:
+    """Extract failed pytest node IDs from the short test summary."""
+    failed_tests: list[str] = []
 
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+
+        if not line.startswith("FAILED "):
+            continue
+
+        details = line.removeprefix("FAILED ").strip()
+
+        if " - " in details:
+            node_id, _reason = details.split(" - ", 1)
+        else:
+            node_id = details
+
+        node_id = node_id.strip()
+
+        # When pytest runs a single absolute file outside its root directory,
+        # the summary may contain only "::test_name".
+        if node_id.startswith("::") and test_path is not None:
+            target = Path(test_path)
+
+            if target.is_file():
+                node_id = f"{target}{node_id}"
+
+        if node_id and node_id not in failed_tests:
+            failed_tests.append(node_id)
+
+    return failed_tests
 
 class RunTestsTool(Tool):
     """Run pytest and return a structured result."""
@@ -115,6 +148,7 @@ class RunTestsTool(Tool):
             output += f"\n[stderr]\n{proc.stderr}"
 
         counts = _parse_pytest_counts(output)
+        failed_tests = _parse_failed_tests(output,target)
 
         if len(output) > 15_000:
             output = (
@@ -134,6 +168,7 @@ class RunTestsTool(Tool):
             "skipped_count": counts["skipped_count"],
             "xfailed_count": counts["xfailed_count"],
             "xpassed_count": counts["xpassed_count"],
+            "failed_tests": failed_tests,
             "output": output.strip() or "(no output)",
         }
 
