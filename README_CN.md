@@ -188,6 +188,15 @@ quit / exit      退出（Ctrl+C 取消当前回合）
 
 会话 ID 会先清洗成安全字符再拿去当文件名，存档统统落在 `~/.corecoder/sessions` 里，恶意会话名穿越不出去。
 
+### DevPilot GitHub Issue 工作流
+
+DevPilot 可以读取真实的 GitHub Issue，确认它是否属于当前仓库，
+理解代码结构，并执行统一的修复工作流。
+
+建议先运行只读分析：
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12 --dry-run
 ## 相关项目
 
 如果你读 CoreCoder 读得还顺，下面几个我做的 agent / LLM 系统方向的工具也许用得上：

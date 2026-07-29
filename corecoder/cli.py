@@ -11,14 +11,57 @@ from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
+from .tools import ALL_TOOLS
 from .agent import Agent
 from .llm import LLM, LiteLLM
 from .config import Config
+from .github_issue import (
+    GitHubIssueFetchError,
+    GitHubIssueReferenceError,
+    fetch_github_issue,
+)
+from .issue_workflow import (
+    IssueWorkflowError,
+    build_issue_repair_prompt,
+)
+from .repository_guard import (
+    RepositoryGuardError,
+    check_issue_repository,
+)
 from .session import save_session, load_session, list_sessions
 from . import __version__
 
 console = Console()
+_DRY_RUN_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "glob",
+        "grep",
+        "repo_map",
+    }
+)
 
+
+def _tools_for_issue_workflow(*, dry_run: bool):
+    """Return the Agent tool profile for an Issue workflow."""
+    if not dry_run:
+        return None
+
+    return [
+        tool
+        for tool in ALL_TOOLS
+        if tool.name in _DRY_RUN_TOOL_NAMES
+    ]
+
+def _format_local_repositories(preflight) -> str:
+    """Return local GitHub repositories for CLI messages."""
+    if not preflight.local_repositories:
+        return "no GitHub remotes found"
+
+    return ", ".join(
+        repository.full_name
+        for repository in preflight.local_repositories
+    )
 
 def _parse_args():
     p = argparse.ArgumentParser(
@@ -28,14 +71,98 @@ def _parse_args():
     p.add_argument("-m", "--model", help="Model name (default: $CORECODER_MODEL or gpt-5.5)")
     p.add_argument("--base-url", help="API base URL (default: $OPENAI_BASE_URL)")
     p.add_argument("--api-key", help="API key (default: $OPENAI_API_KEY)")
-    p.add_argument("-p", "--prompt", help="One-shot prompt (non-interactive mode)")
+    input_group = p.add_mutually_exclusive_group()
+
+    input_group.add_argument(
+        "-p",
+        "--prompt",
+        help="One-shot prompt (non-interactive mode)",
+    )
+    input_group.add_argument(
+        "--issue",
+        metavar="URL",
+        help=(
+            "Fetch a GitHub Issue URL and run a structured "
+            "DevPilot repair workflow"
+        ),
+    )
+
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Analyze the GitHub Issue and propose a repair "
+            "without modifying files"
+        ),
+    )
     p.add_argument("-r", "--resume", metavar="ID", help="Resume a saved session")
     p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
-    return p.parse_args()
+    args = p.parse_args()
+
+    if args.dry_run and not args.issue:
+        p.error("--dry-run requires --issue")
+
+    return args
 
 
 def main():
     args = _parse_args()
+
+    issue_task = None
+    issue_prompt = None
+    repository_preflight = None
+
+
+    if args.issue:
+        try:
+            issue_task = fetch_github_issue(
+                issue_url=args.issue,
+            )
+
+            repository_preflight = check_issue_repository(
+                issue_task
+            )
+
+            if repository_preflight.status == "mismatch":
+                local_repositories = _format_local_repositories(
+                    repository_preflight
+                )
+
+                console.print(
+                    "[red bold]Repository mismatch:[/] "
+                    f"Issue belongs to "
+                    f"[cyan]{repository_preflight.target.full_name}[/cyan], "
+                    f"but the current repository remotes are "
+                    f"[yellow]{local_repositories}[/yellow]."
+                )
+                console.print(
+                    "Run DevPilot from the matching repository "
+                    "before attempting this Issue."
+                )
+                sys.exit(1)
+
+            if repository_preflight.status == "unknown":
+                console.print(
+                    "[yellow bold]Repository verification warning:[/] "
+                    "No supported GitHub remote was found. "
+                    "Continuing without repository identity verification."
+                )
+
+            issue_prompt = build_issue_repair_prompt(
+                issue_task,
+                dry_run=args.dry_run,
+            )
+
+        except (
+            GitHubIssueReferenceError,
+            GitHubIssueFetchError,
+            IssueWorkflowError,
+            RepositoryGuardError,
+        ) as error:
+            console.print(
+                f"[red bold]Issue workflow error:[/] {error}"
+            )
+            sys.exit(1)
     config = Config.from_env()
 
     # CLI args override env vars
@@ -70,7 +197,18 @@ def main():
         temperature=config.temperature,
         max_tokens=config.max_tokens,
     )
-    agent = Agent(llm=llm, max_context_tokens=config.max_context_tokens)
+    agent_tools = None
+
+    if args.issue:
+        agent_tools = _tools_for_issue_workflow(
+            dry_run=args.dry_run,
+        )
+
+    agent = Agent(
+        llm=llm,
+        tools=agent_tools,
+        max_context_tokens=config.max_context_tokens,
+    )
 
     # resume saved session
     if args.resume:
@@ -86,7 +224,40 @@ def main():
             console.print(f"[red]Session '{args.resume}' not found.[/red]")
             sys.exit(1)
 
-    # one-shot mode
+    # GitHub Issue workflow mode
+    if args.issue:
+        assert issue_task is not None
+        assert issue_prompt is not None
+        assert repository_preflight is not None
+        mode = "dry run" if args.dry_run else "repair"
+
+        issue_number = (
+            f"#{issue_task.issue_number}"
+            if issue_task.issue_number is not None
+            else "unknown number"
+        )
+
+        repository_status = repository_preflight.status
+
+        console.print(
+            Panel(
+                (
+                    f"[bold]{issue_task.title}[/bold]\n"
+                    f"Issue: [cyan]{issue_number}[/cyan]\n"
+                    f"Repository: "
+                    f"[cyan]{repository_preflight.target.full_name}[/cyan]\n"
+                    f"Preflight: [cyan]{repository_status}[/cyan]\n"
+                    f"Mode: [cyan]{mode}[/cyan]"
+                ),
+                title="DevPilot Issue Workflow",
+                border_style="blue",
+            )
+        )
+
+        _run_once(agent, issue_prompt)
+        return
+
+    # one-shot prompt mode
     if args.prompt:
         _run_once(agent, args.prompt)
         return

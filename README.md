@@ -78,6 +78,19 @@ corecoder                                             # interactive REPL
 corecoder -p "add error handling to parse_config()"   # one-shot mode, exits when done
 ```
 
+
+```markdown
+### DevPilot GitHub Issue workflow
+
+DevPilot can fetch a real GitHub Issue, verify that it belongs to the
+current repository, inspect the codebase, and run a structured repair
+workflow.
+
+Start with a read-only dry run:
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12 --dry-run
+
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.
