@@ -10,6 +10,7 @@ from .agent import AgentTool
 from .run_tests import RunTestsTool
 from .repo_map import RepoMapTool
 from .parse_issue import ParseIssueTool
+from .fetch_issue import FetchIssueTool
 
 ALL_TOOLS = [
     BashTool(),
@@ -22,6 +23,7 @@ ALL_TOOLS = [
     RunTestsTool(),
     RepoMapTool(),
     ParseIssueTool(),
+    FetchIssueTool(),
 ]
 
 
