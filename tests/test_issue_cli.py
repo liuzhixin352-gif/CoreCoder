@@ -57,6 +57,218 @@ def _repository_preflight(
         status=status,
     )
 
+def _unknown_repository_preflight() -> RepositoryPreflight:
+    """Return an unverified repository preflight result."""
+    return RepositoryPreflight(
+        target=GitHubRepository(
+            owner="example",
+            repo="project",
+        ),
+        local_repositories=(),
+        status="unknown",
+    )
+
+def test_main_blocks_unknown_repository_in_repair_mode(
+    monkeypatch,
+):
+    task = _sample_task()
+    printed = []
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: task,
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _unknown_repository_preflight(),
+    )
+
+    monkeypatch.setattr(
+        cli.Config,
+        "from_env",
+        classmethod(
+            lambda cls: pytest.fail(
+                "Configuration must not be loaded when an "
+                "unverified repair is blocked"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "LLM",
+        lambda **kwargs: pytest.fail(
+            "LLM must not be created when an "
+            "unverified repair is blocked"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "Agent",
+        lambda **kwargs: pytest.fail(
+            "Agent must not be created when an "
+            "unverified repair is blocked"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda *args, **kwargs: pytest.fail(
+            "Workflow must not run when an "
+            "unverified repair is blocked"
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+    assert "Repository verification required:" in output
+    assert "Real Issue repair is blocked by default." in output
+    assert "--allow-unverified-repository" in output
+
+def test_main_allows_unknown_repository_in_dry_run(
+    monkeypatch,
+):
+    captured = {}
+    printed = []
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _unknown_repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "unknown dry-run prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--dry-run",
+        ],
+    )
+
+    cli.main()
+
+    assert captured["prompt"] == "unknown dry-run prompt"
+
+    tool_names = {
+        tool.name
+        for tool in captured["agent_kwargs"]["tools"]
+    }
+    assert tool_names == {
+        "read_file",
+        "glob",
+        "grep",
+        "repo_map",
+    }
+
+    output = "\n".join(printed)
+    assert "Continuing in read-only dry-run mode." in output
+
+def test_main_allows_unknown_repository_with_override(
+    monkeypatch,
+):
+    captured = {}
+    printed = []
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _unknown_repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "unverified repair prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--allow-unverified-repository",
+        ],
+    )
+
+    cli.main()
+
+    assert captured["prompt"] == "unverified repair prompt"
+
+    # Repair mode receives the normal complete tool profile.
+    assert captured["agent_kwargs"]["tools"] is None
+
+    output = "\n".join(printed)
+    assert "Repository verification override:" in output
+    assert "--allow-unverified-repository was provided." in output
+
 def _patch_runtime(
     monkeypatch,
     captured: dict | None = None,
@@ -109,6 +321,49 @@ def test_parse_args_accepts_issue_dry_run(monkeypatch):
     assert args.issue == _ISSUE_URL
     assert args.dry_run is True
     assert args.prompt is None
+
+
+def test_parse_args_accepts_allow_unverified_repository_with_issue(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--allow-unverified-repository",
+        ],
+    )
+
+    args = cli._parse_args()
+
+    assert args.issue == _ISSUE_URL
+    assert args.allow_unverified_repository is True
+
+
+def test_parse_args_rejects_allow_unverified_repository_without_issue(
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--allow-unverified-repository",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli._parse_args()
+
+    assert error.value.code == 2
+    assert (
+        "--allow-unverified-repository requires --issue"
+        in capsys.readouterr().err
+    )
 
 
 def test_parse_args_rejects_dry_run_without_issue(
@@ -467,8 +722,16 @@ def test_repair_tool_profile_uses_default_tools():
         is None
     )
 
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        [],
+        ["--allow-unverified-repository"],
+    ],
+)
 def test_main_stops_before_runtime_on_repository_mismatch(
     monkeypatch,
+    extra_args,
 ):
     task = _sample_task()
     printed = []
@@ -552,6 +815,7 @@ def test_main_stops_before_runtime_on_repository_mismatch(
             "corecoder",
             "--issue",
             _ISSUE_URL,
+            *extra_args,
         ],
     )
 

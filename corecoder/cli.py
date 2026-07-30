@@ -95,12 +95,25 @@ def _parse_args():
             "without modifying files"
         ),
     )
+    p.add_argument(
+        "--allow-unverified-repository",
+        action="store_true",
+        help=(
+            "Allow a real Issue repair when the current "
+            "GitHub repository cannot be verified"
+        ),
+    )
     p.add_argument("-r", "--resume", metavar="ID", help="Resume a saved session")
     p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args()
 
     if args.dry_run and not args.issue:
         p.error("--dry-run requires --issue")
+
+    if args.allow_unverified_repository and not args.issue:
+        p.error(
+        "--allow-unverified-repository requires --issue"
+        )
 
     return args
 
@@ -142,11 +155,31 @@ def main():
                 sys.exit(1)
 
             if repository_preflight.status == "unknown":
-                console.print(
-                    "[yellow bold]Repository verification warning:[/] "
-                    "No supported GitHub remote was found. "
-                    "Continuing without repository identity verification."
-                )
+                if args.dry_run:
+                    console.print(
+                        "[yellow bold]Repository verification warning:[/] "
+                        "No supported GitHub remote was found. "
+                        "Continuing in read-only dry-run mode."
+                    )
+                elif not args.allow_unverified_repository:
+                    console.print(
+                        "[red bold]Repository verification required:[/] "
+                        "No supported GitHub remote was found. "
+                        "Real Issue repair is blocked by default."
+                    )
+                    console.print(
+                        "Use --dry-run for read-only analysis, or pass "
+                        "--allow-unverified-repository only after "
+                        "independently verifying the current repository."
+                    )
+                    sys.exit(1)
+                else:
+                    console.print(
+                        "[yellow bold]Repository verification override:[/] "
+                        "No supported GitHub remote was found. "
+                        "Continuing because "
+                        "--allow-unverified-repository was provided."
+                    )
 
             issue_prompt = build_issue_repair_prompt(
                 issue_task,
