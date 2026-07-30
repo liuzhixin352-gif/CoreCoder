@@ -437,5 +437,65 @@ def _show_help():
 
 
 def _brief(kwargs: dict, maxlen: int = 80) -> str:
-    s = ", ".join(f"{k}={repr(v)[:40]}" for k, v in kwargs.items())
-    return s[:maxlen] + ("..." if len(s) > maxlen else "")
+    """Format tool keyword arguments for a compact terminal preview.
+
+    Each value's repr is capped at ~40 characters.  Long string reprs are
+    shortened with an ellipsis while preserving both opening and closing
+    quotes so the preview never shows an orphaned quote character.
+    The final result is further trimmed to *maxlen*.
+    """
+    parts = []
+    for k, v in kwargs.items():
+        r = repr(v)
+        # Safely truncate long string reprs so the closing quote is kept
+        if len(r) > 40:
+            q = r[0]
+            if q in ("'", '"') and r[-1] == q:
+                inner = r[1:-1]
+                target = 40 - len(q) * 2 - 3  # room for q + inner + ... + q
+                if target > 0 and len(inner) > target:
+                    r = q + inner[:target] + "..." + q
+        parts.append(f"{k}={r}")
+
+    s = ", ".join(parts)
+
+    if len(s) <= maxlen:
+        return s
+
+    if maxlen <= 0:
+        return ""
+
+    if maxlen <= 3:
+        return "..."[:maxlen]
+
+    kept_parts = []
+
+    for part in parts:
+        full_preview = ", ".join([*kept_parts, part])
+
+        if len(full_preview) <= maxlen:
+            kept_parts.append(part)
+            continue
+
+        # The complete value does not fit. Preserve the argument name
+        # without cutting through its repr or leaving an open quote.
+        key, _, _ = part.partition("=")
+        shortened_part = f"{key}=..."
+        shortened_preview = ", ".join([*kept_parts, shortened_part])
+
+        if len(shortened_preview) <= maxlen:
+            return shortened_preview
+
+        # If even key=... does not fit, preserve as many earlier complete
+        # arguments as possible and mark the omitted remainder.
+        while kept_parts:
+            omitted_preview = ", ".join([*kept_parts, "..."])
+
+            if len(omitted_preview) <= maxlen:
+                return omitted_preview
+
+            kept_parts.pop()
+
+        return "..."[:maxlen]
+
+    return s

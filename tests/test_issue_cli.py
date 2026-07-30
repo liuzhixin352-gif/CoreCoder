@@ -673,3 +673,127 @@ def test_main_reports_repository_preflight_error(
         "unable to determine Issue repository" in message
         for message in printed
     )
+
+
+# ---------------------------------------------------------------------------
+# _brief preview formatting
+# ---------------------------------------------------------------------------
+
+SHORT_URL = "https://example.com/short"
+LONG_URL = (
+    "https://github.com/python/cpython/issues/"
+    "123456789012345678901234567890"
+)
+
+
+def test_brief_short_value():
+    """Short string values are not truncated."""
+    result = cli._brief({"url": SHORT_URL})
+    # repr(SHORT_URL) = "'https://example.com/short'"  (28 chars, well under 40)
+    assert "'https://example.com/short'" in result
+    assert result == "url='https://example.com/short'"
+    assert len(result) <= 80
+
+
+def test_brief_long_url():
+    """A single long URL is safely truncated with a closing quote preserved."""
+    result = cli._brief({"issue_url": LONG_URL})
+    # The repr of LONG_URL exceeds 40 characters; the inner content should
+    # be shortened with "..." while the outer quotes remain intact.
+    assert result.startswith("issue_url=")
+    assert result.count("'") == 2, "closing quote must be present"
+    assert "..." in result
+    assert len(result) <= 80
+
+
+def test_brief_multiple_args():
+    """Multiple arguments remain distinguishable in the preview."""
+    result = cli._brief(
+        {
+            "owner": "python",
+            "repo": "cpython",
+            "issue_url": LONG_URL,
+        }
+    )
+    assert result.startswith("owner=")
+    assert "'python'" in result
+    assert "'cpython'" in result
+    assert "issue_url=" in result
+    # Every value keeps its quotes
+    assert result.count("'") >= 4
+    assert len(result) <= 80
+
+
+def test_brief_small_maxlen():
+    """With a small maxlen the result is truncated and ends with '...'."""
+    result = cli._brief({"issue_url": LONG_URL}, maxlen=20)
+    assert len(result) <= 20
+    assert result.endswith("...")
+
+
+def test_brief_multiple_args_respects_maxlen():
+    """Multiple args are still capped by maxlen."""
+    result = cli._brief(
+        {
+            "owner": "python",
+            "repo": "cpython",
+            "issue_url": LONG_URL,
+            "extra": "x" * 100,
+        },
+        maxlen=50,
+    )
+    assert len(result) <= 50
+    assert result.endswith("...")
+
+
+def test_brief_empty():
+    """Empty kwargs produce an empty string."""
+    assert cli._brief({}) == ""
+
+
+def test_brief_non_string_values():
+    """Non-string values (int, float, None, bool) are displayed unchanged."""
+    result = cli._brief(
+        {
+            "count": 42,
+            "ratio": 3.14,
+            "enabled": True,
+            "callback": None,
+        }
+    )
+    assert "count=42" in result
+    assert "ratio=3.14" in result
+    assert "enabled=True" in result
+    assert "callback=None" in result
+    assert len(result) <= 80
+
+
+def test_brief_small_maxlen_does_not_leave_open_quote():
+    result = cli._brief(
+        {
+            "issue_url": LONG_URL,
+        },
+        maxlen=20,
+    )
+
+    assert len(result) <= 20
+    assert result.endswith("...")
+    assert result.count("'") % 2 == 0
+
+def test_brief_truncation_handles_escaped_quotes():
+    value = (
+        'He said "don\'t" and then continued '
+        "with a very long explanation"
+    )
+
+    result = cli._brief(
+        {
+            "text": value,
+        },
+        maxlen=30,
+    )
+
+    assert len(result) <= 30
+    assert result == "text=..."
+    assert not result.endswith("'...")
+    assert not result.endswith('"...')
