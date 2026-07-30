@@ -78,6 +78,46 @@ corecoder                                  # 交互式 REPL
 corecoder -p "给 parse_config() 加错误处理"   # 一次性模式，干完就退
 ```
 
+### DevPilot GitHub Issue 工作流
+
+DevPilot 可以获取真实的 GitHub Issue、验证当前代码仓库、检查代码，
+并执行结构化的修复工作流。
+
+建议先运行只读分析：
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12 --dry-run
+```
+
+当当前仓库被验证为 Issue 对应的准确仓库或同名 fork 时，可以执行真实修复：
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12
+```
+
+仓库验证规则如下：
+
+| 仓库状态 | 只读分析 | 真实修复 |
+|---|---|---|
+| `exact` | 允许 | 允许 |
+| `fork` | 允许 | 允许 |
+| `mismatch` | 拒绝 | 拒绝 |
+| `unknown` | 允许只读分析 | 默认拒绝 |
+
+`--dry-run` 模式只能使用 `read_file`、`glob`、`grep` 和 `repo_map`
+四个只读工具。
+
+当仓库状态为 `unknown` 时，用户必须先自行确认当前工作目录确实正确，
+然后通过显式参数授权真实修复：
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12 \
+  --allow-unverified-repository
+```
+
+该参数只能绕过 `unknown` 状态，不能绕过已经确认的仓库不匹配。
+
+
 ## 读懂它：代码地图
 
 整个项目摊开就这么大，clone 之前扫一眼，心里就有数了。这也是它和 Claude Code 几十万行最实在的区别：你能把它当一本书的目录来读。建议从 `agent.py` 的主循环读起，那是整个 agent 的心脏。

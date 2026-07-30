@@ -78,18 +78,47 @@ corecoder                                             # interactive REPL
 corecoder -p "add error handling to parse_config()"   # one-shot mode, exits when done
 ```
 
-
-```markdown
 ### DevPilot GitHub Issue workflow
 
-DevPilot can fetch a real GitHub Issue, verify that it belongs to the
-current repository, inspect the codebase, and run a structured repair
-workflow.
+DevPilot can fetch a real GitHub Issue, verify the current repository,
+inspect the codebase, and run a structured repair workflow.
 
 Start with a read-only dry run:
 
 ```bash
 corecoder --issue https://github.com/owner/repository/issues/12 --dry-run
+```
+
+When the current repository is verified as the exact Issue repository or
+a same-name fork, run the real repair workflow with:
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12
+```
+
+Repository verification follows these rules:
+
+| Repository status | Dry run | Real repair |
+|---|---|---|
+| `exact` | allowed | allowed |
+| `fork` | allowed | allowed |
+| `mismatch` | blocked | blocked |
+| `unknown` | allowed in read-only mode | blocked by default |
+
+Dry-run mode exposes only the read-only tools `read_file`, `glob`,
+`grep`, and `repo_map`.
+
+When the repository status is `unknown`, a real repair can proceed only
+after the user independently verifies the working directory and provides
+an explicit override:
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12 \
+  --allow-unverified-repository
+```
+
+The override applies only to an `unknown` repository. It cannot bypass a
+confirmed repository mismatch.
 
 ## Read it: the code map
 
