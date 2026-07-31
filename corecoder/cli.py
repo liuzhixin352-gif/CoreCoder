@@ -27,6 +27,7 @@ from .issue_workflow import (
 from .repository_guard import (
     RepositoryGuardError,
     check_issue_repository,
+    check_worktree,
 )
 from .session import save_session, load_session, list_sessions
 from . import __version__
@@ -181,6 +182,40 @@ def main():
                         "--allow-unverified-repository was provided."
                     )
 
+
+            if not args.dry_run:
+                worktree_preflight = check_worktree()
+
+                if worktree_preflight.status == "not_repository":
+                    console.print(
+                        "[red bold]Git worktree required:[/] "
+                        "Real Issue repair must run inside "
+                        "a Git worktree."
+                    )
+                    console.print(
+                        "Run DevPilot from the target Git repository, "
+                        "or use --dry-run for read-only analysis."
+                    )
+                    sys.exit(1)
+
+                if worktree_preflight.status == "dirty":
+                    console.print(
+                        "[red bold]Clean worktree required:[/] "
+                        "Real Issue repair cannot start while "
+                        "the current Git worktree has "
+                        "uncommitted changes."
+                    )
+
+                    for change in worktree_preflight.changes:
+                        console.print(
+                            f"  [yellow]{change}[/yellow]"
+                        )
+
+                    console.print(
+                        "Commit, stash, or discard these changes "
+                        "before starting the repair."
+                    )
+                    sys.exit(1)
             issue_prompt = build_issue_repair_prompt(
                 issue_task,
                 dry_run=args.dry_run,

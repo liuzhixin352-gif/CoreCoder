@@ -16,6 +16,7 @@ from corecoder.repository_guard import (
     GitHubRepository,
     RepositoryGuardError,
     RepositoryPreflight,
+    WorktreePreflight,
 )
 
 _ISSUE_URL = "https://github.com/example/project/issues/21"
@@ -66,6 +67,16 @@ def _unknown_repository_preflight() -> RepositoryPreflight:
         ),
         local_repositories=(),
         status="unknown",
+    )
+
+def _worktree_preflight(
+    status: str = "clean",
+    changes: tuple[str, ...] = (),
+) -> WorktreePreflight:
+    """Return a representative Git worktree preflight result."""
+    return WorktreePreflight(
+        status=status,
+        changes=changes,
     )
 
 def test_main_blocks_unknown_repository_in_repair_mode(
@@ -269,11 +280,295 @@ def test_main_allows_unknown_repository_with_override(
     assert "Repository verification override:" in output
     assert "--allow-unverified-repository was provided." in output
 
+def test_main_blocks_dirty_worktree_before_runtime(
+    monkeypatch,
+):
+    task = _sample_task()
+    printed = []
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: task,
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(
+            status="dirty",
+            changes=(
+                " M corecoder/cli.py",
+                "?? scratch.txt",
+            ),
+        ),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        cli.Config,
+        "from_env",
+        classmethod(
+            lambda cls: pytest.fail(
+                "Configuration must not be loaded when "
+                "a dirty worktree blocks repair"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "LLM",
+        lambda **kwargs: pytest.fail(
+            "LLM must not be created when "
+            "a dirty worktree blocks repair"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "Agent",
+        lambda **kwargs: pytest.fail(
+            "Agent must not be created when "
+            "a dirty worktree blocks repair"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda *args, **kwargs: pytest.fail(
+            "Workflow must not run when "
+            "a dirty worktree blocks repair"
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+    assert "Clean worktree required:" in output
+    assert "uncommitted changes" in output
+    assert "corecoder/cli.py" in output
+    assert "scratch.txt" in output
+
+
+def test_main_blocks_repair_outside_git_worktree(
+    monkeypatch,
+):
+    task = _sample_task()
+    printed = []
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: task,
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(
+            status="not_repository",
+        ),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        cli.Config,
+        "from_env",
+        classmethod(
+            lambda cls: pytest.fail(
+                "Configuration must not be loaded outside "
+                "a Git worktree"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "LLM",
+        lambda **kwargs: pytest.fail(
+            "LLM must not be created outside "
+            "a Git worktree"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "Agent",
+        lambda **kwargs: pytest.fail(
+            "Agent must not be created outside "
+            "a Git worktree"
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+    assert "Git worktree required:" in output
+    assert "inside a Git worktree" in output
+
+
+def test_main_checks_clean_worktree_before_repair(
+    monkeypatch,
+):
+    captured = {}
+    worktree_calls = []
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+
+    def fake_check_worktree():
+        worktree_calls.append(True)
+        return _worktree_preflight()
+
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        fake_check_worktree,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "clean repair prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+    assert worktree_calls == [True]
+    assert captured["prompt"] == "clean repair prompt"
+
+
+def test_main_skips_worktree_check_in_dry_run(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: pytest.fail(
+            "Dry-run must not inspect worktree cleanliness"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "dry-run prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--dry-run",
+        ],
+    )
+
+    cli.main()
+
+    assert captured["prompt"] == "dry-run prompt"
+
 def _patch_runtime(
     monkeypatch,
     captured: dict | None = None,
 ) -> None:
     """Replace configuration, LLM, and Agent construction."""
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(),
+    )
     monkeypatch.setattr(
         cli.Config,
         "from_env",

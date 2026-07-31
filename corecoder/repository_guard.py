@@ -77,6 +77,20 @@ class RepositoryPreflight:
             "fork",
         }
 
+@dataclass(frozen=True)
+class WorktreePreflight:
+    """Result of inspecting the current Git worktree."""
+
+    status: str
+    changes: tuple[str, ...]
+
+    @property
+    def ready_for_repair(self) -> bool:
+        """Return whether a repair can safely modify the worktree."""
+        return self.status == "clean"
+
+
+
 
 def _validate_repository_component(
     value: str,
@@ -158,6 +172,81 @@ def parse_github_repository_remote(
         repo=repo,
     )
 
+def check_worktree(
+    cwd: str | Path | None = None,
+) -> WorktreePreflight:
+    """Inspect whether the current Git worktree is clean."""
+    try:
+        repository_check = subprocess.run(
+            [
+                "git",
+                "rev-parse",
+                "--is-inside-work-tree",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+        )
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        raise RepositoryGuardError(
+            "unable to inspect Git worktree"
+        ) from error
+
+    if (
+        repository_check.returncode != 0
+        or repository_check.stdout.strip().casefold() != "true"
+    ):
+        return WorktreePreflight(
+            status="not_repository",
+            changes=(),
+        )
+
+    try:
+        status_check = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+        )
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        raise RepositoryGuardError(
+            "unable to inspect Git worktree"
+        ) from error
+
+    if status_check.returncode != 0:
+        raise RepositoryGuardError(
+            "unable to inspect Git worktree"
+        )
+
+    changes = tuple(
+        line
+        for line in status_check.stdout.splitlines()
+        if line
+    )
+
+    return WorktreePreflight(
+        status="dirty" if changes else "clean",
+        changes=changes,
+    )
 
 def get_local_github_repositories(
     cwd: str | Path | None = None,
