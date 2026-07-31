@@ -120,6 +120,28 @@ corecoder --issue https://github.com/owner/repository/issues/12 \
 The override applies only to an `unknown` repository. It cannot bypass a
 confirmed repository mismatch.
 
+### Worktree safety
+
+A real repair also requires the current directory to be inside a Git
+worktree and the worktree to be clean. This prevents DevPilot from mixing
+an Issue repair with existing uncommitted work.
+
+| Worktree state | Dry run | Real repair |
+|---|---|---|
+| Clean Git worktree | allowed | allowed |
+| Dirty Git worktree | allowed in read-only mode | blocked |
+| Not a Git worktree | allowed in read-only mode | blocked |
+
+Before starting a real repair, this command should produce no output:
+
+```bash
+git status --short
+```
+
+Commit, stash, or discard existing changes before running the repair.
+`--allow-unverified-repository` does not bypass the Git worktree or
+cleanliness checks.
+
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.

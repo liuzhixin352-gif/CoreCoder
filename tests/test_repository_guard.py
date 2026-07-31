@@ -3,7 +3,7 @@
 import subprocess
 
 import pytest
-
+import corecoder.repository_guard as repository_guard
 from corecoder.issue_task import IssueTask
 from corecoder.repository_guard import (
     GitHubRepository,
@@ -225,3 +225,175 @@ def test_check_issue_repository_requires_issue_url():
         check_issue_repository(
             IssueTask(title="Missing URL")
         )
+
+def test_check_worktree_reports_clean(monkeypatch):
+    responses = iter(
+        [
+            subprocess.CompletedProcess(
+                args=[
+                    "git",
+                    "rev-parse",
+                    "--is-inside-work-tree",
+                ],
+                returncode=0,
+                stdout="true\n",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=[
+                    "git",
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                ],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ]
+    )
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return next(responses)
+
+    monkeypatch.setattr(
+        repository_guard.subprocess,
+        "run",
+        fake_run,
+    )
+
+    result = repository_guard.check_worktree(
+        cwd="example-repository"
+    )
+
+    assert result.status == "clean"
+    assert result.changes == ()
+    assert result.ready_for_repair is True
+
+    assert [
+        args
+        for args, _ in calls
+    ] == [
+        [
+            "git",
+            "rev-parse",
+            "--is-inside-work-tree",
+        ],
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+    ]
+    assert all(
+        kwargs["cwd"] == "example-repository"
+        for _, kwargs in calls
+    )
+
+
+def test_check_worktree_reports_dirty_changes(monkeypatch):
+    responses = iter(
+        [
+            subprocess.CompletedProcess(
+                args=[
+                    "git",
+                    "rev-parse",
+                    "--is-inside-work-tree",
+                ],
+                returncode=0,
+                stdout="true\n",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=[
+                    "git",
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                ],
+                returncode=0,
+                stdout=(
+                    " M corecoder/cli.py\n"
+                    "M  tests/test_issue_cli.py\n"
+                    "?? scratch.txt\n"
+                ),
+                stderr="",
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(
+        repository_guard.subprocess,
+        "run",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    result = repository_guard.check_worktree()
+
+    assert result.status == "dirty"
+    assert result.changes == (
+        " M corecoder/cli.py",
+        "M  tests/test_issue_cli.py",
+        "?? scratch.txt",
+    )
+    assert result.ready_for_repair is False
+
+
+def test_check_worktree_reports_not_repository(monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=128,
+            stdout="",
+            stderr=(
+                "fatal: not a git repository "
+                "(or any parent up to mount point)"
+            ),
+        )
+
+    monkeypatch.setattr(
+        repository_guard.subprocess,
+        "run",
+        fake_run,
+    )
+
+    result = repository_guard.check_worktree()
+
+    assert result.status == "not_repository"
+    assert result.changes == ()
+    assert result.ready_for_repair is False
+
+    # A failed rev-parse must stop before git status is run.
+    assert calls == [
+        [
+            "git",
+            "rev-parse",
+            "--is-inside-work-tree",
+        ]
+    ]
+
+
+def test_check_worktree_reports_git_execution_failure(
+    monkeypatch,
+):
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("git executable not found")
+
+    monkeypatch.setattr(
+        repository_guard.subprocess,
+        "run",
+        fake_run,
+    )
+
+    with pytest.raises(
+        RepositoryGuardError,
+        match="unable to inspect Git worktree",
+    ):
+        repository_guard.check_worktree()
