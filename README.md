@@ -191,6 +191,44 @@ Dry-run mode skips this inspection because it must remain read-only. A Git
 inspection failure is reported as a post-repair summary error and returns a
 non-zero exit status.
 
+### Mandatory post-repair validation
+
+When a real Issue repair produces repository changes, DevPilot automatically
+runs the project test suite after printing the post-repair summary:
+
+```text
+Post-repair validation
+Command: python -m pytest tests -q
+Status: passed
+Passed: 275
+```
+
+The validation runs only when all of the following are true:
+
+- the workflow is a real repair rather than a dry run;
+- the Agent completed successfully;
+- the Git worktree contains repair changes.
+
+When no repository changes are produced, DevPilot skips validation. Dry-run
+mode also skips validation to remain read-only.
+
+A failed test run is reported with its available counts:
+
+```text
+Post-repair validation
+Status: failed
+Passed: 10
+Failed: 2
+```
+
+Failed, interrupted, invalid, or empty test runs return a non-zero process
+status. The repair branch and its uncommitted changes are preserved for
+inspection; DevPilot does not automatically stage, commit, push, or discard
+them.
+
+If pytest cannot be started or exceeds its execution timeout, DevPilot reports
+a post-repair validation error and exits with a non-zero status.
+
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.

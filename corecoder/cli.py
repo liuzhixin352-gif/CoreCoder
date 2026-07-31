@@ -28,6 +28,10 @@ from .post_repair import (
     PostRepairSummaryError,
     collect_post_repair_summary,
 )
+from .post_repair_validation import (
+    PostRepairValidationError,
+    run_post_repair_validation,
+)
 from .repair_branch import (
     RepairBranchError,
     create_repair_branch,
@@ -373,6 +377,62 @@ def main():
                     console.print(
                         f"  [yellow]{change}[/yellow]"
                     )
+
+                try:
+                    post_repair_validation = (
+                        run_post_repair_validation()
+                    )
+                except PostRepairValidationError as error:
+                    console.print(
+                        "[red bold]"
+                        "Post-repair validation error:"
+                        "[/] "
+                        f"{error}"
+                    )
+                    sys.exit(1)
+
+                validation_command = " ".join(
+                    post_repair_validation.command
+                )
+                validation_style = (
+                    "green"
+                    if post_repair_validation.passed
+                    else "red"
+                )
+
+                console.print()
+                console.print(
+                    "[bold]Post-repair validation[/bold]"
+                )
+                console.print(
+                    "[bold]Command:[/] "
+                    f"[cyan]{validation_command}[/cyan]"
+                )
+                console.print(
+                    "[bold]Status:[/] "
+                    f"[{validation_style}]"
+                    f"{post_repair_validation.status}"
+                    f"[/{validation_style}]"
+                )
+                console.print(
+                    "[bold]Passed:[/] "
+                    f"{post_repair_validation.passed_count}"
+                )
+
+                if post_repair_validation.failed_count:
+                    console.print(
+                        "[bold]Failed:[/] "
+                        f"{post_repair_validation.failed_count}"
+                    )
+
+                if post_repair_validation.error_count:
+                    console.print(
+                        "[bold]Errors:[/] "
+                        f"{post_repair_validation.error_count}"
+                    )
+
+                if not post_repair_validation.passed:
+                    sys.exit(1)
             else:
                 console.print(
                     "[yellow]"

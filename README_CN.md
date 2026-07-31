@@ -183,6 +183,43 @@ No repository changes were produced.
 只读分析模式不会执行该检查，以保证整个流程保持只读。如果 Git 状态检查
 失败，DevPilot 会报告修复结果摘要错误，并以非零状态码退出。
 
+### 强制修复后验证
+
+当真实 Issue 修复产生仓库修改时，DevPilot 会在输出修复结果摘要后，
+自动运行项目测试套件：
+
+```text
+Post-repair validation
+Command: python -m pytest tests -q
+Status: passed
+Passed: 275
+```
+
+只有同时满足以下条件时才会执行验证：
+
+- 当前流程是真实修复，而不是只读分析；
+- Agent 已正常完成；
+- Git 工作区中存在本次修复产生的修改。
+
+当 Agent 没有产生仓库修改时，DevPilot 会跳过验证。只读分析模式也不会
+运行验证，以保证流程保持只读。
+
+测试失败时，DevPilot 会输出能够解析到的结果数量：
+
+```text
+Post-repair validation
+Status: failed
+Passed: 10
+Failed: 2
+```
+
+测试失败、被中断、配置无效或没有发现测试时，程序都会以非零状态码退出。
+专用修复分支及其中尚未提交的修改会被保留，方便人工检查；DevPilot 不会
+自动暂存、提交、推送或丢弃这些修改。
+
+如果 pytest 无法启动或超过执行超时时间，DevPilot 会报告修复后验证错误，
+并以非零状态码退出。
+
 ## 读懂它：代码地图
 
 整个项目摊开就这么大，clone 之前扫一眼，心里就有数了。这也是它和 Claude Code 几十万行最实在的区别：你能把它当一本书的目录来读。建议从 `agent.py` 的主循环读起，那是整个 agent 的心脏。
