@@ -152,6 +152,45 @@ Branch names use the Issue number and a normalized form of the title:
 
 ```text
 devpilot/issue-21-fix-repository-scan-limit
+```
+
+Branch names are limited to 80 characters. When a title contains no usable
+ASCII characters, DevPilot falls back to the Issue-number-only form:
+
+```text
+devpilot/issue-21
+```
+
+Dry-run mode does not create or switch branches. If the branch cannot be
+created, the repair stops before configuration or Agent startup.
+
+### Post-repair summary
+
+After a real Issue repair finishes, DevPilot inspects the Git worktree and
+prints the dedicated repair branch together with every changed or untracked
+file:
+
+```text
+Post-repair summary
+Repair branch: devpilot/issue-21-fix-repository-scan-limit
+Changed files:
+   M corecoder/cli.py
+  ?? tests/test_example.py
+```
+
+Git porcelain status prefixes are preserved so staged, unstaged, deleted,
+renamed, and untracked files remain distinguishable.
+
+When the Agent produces no repository changes, DevPilot reports:
+
+```text
+No repository changes were produced.
+```
+
+Dry-run mode skips this inspection because it must remain read-only. A Git
+inspection failure is reported as a post-repair summary error and returns a
+non-zero exit status.
+
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.

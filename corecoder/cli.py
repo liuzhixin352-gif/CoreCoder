@@ -24,6 +24,10 @@ from .issue_workflow import (
     IssueWorkflowError,
     build_issue_repair_prompt,
 )
+from .post_repair import (
+    PostRepairSummaryError,
+    collect_post_repair_summary,
+)
 from .repair_branch import (
     RepairBranchError,
     create_repair_branch,
@@ -129,6 +133,7 @@ def main():
     issue_task = None
     issue_prompt = None
     repository_preflight = None
+    repair_branch = None
 
 
     if args.issue:
@@ -335,6 +340,46 @@ def main():
         )
 
         _run_once(agent, issue_prompt)
+
+        if not args.dry_run:
+            assert repair_branch is not None
+
+            try:
+                post_repair_summary = (
+                    collect_post_repair_summary(
+                        repair_branch
+                    )
+                )
+            except PostRepairSummaryError as error:
+                console.print(
+                    "[red bold]Post-repair summary error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+
+            console.print()
+            console.print(
+                "[bold]Post-repair summary[/bold]"
+            )
+            console.print(
+                "[bold]Repair branch:[/] "
+                f"[cyan]{post_repair_summary.branch}[/cyan]"
+            )
+
+            if post_repair_summary.has_changes:
+                console.print("[bold]Changed files:[/]")
+
+                for change in post_repair_summary.changes:
+                    console.print(
+                        f"  [yellow]{change}[/yellow]"
+                    )
+            else:
+                console.print(
+                    "[yellow]"
+                    "No repository changes were produced."
+                    "[/yellow]"
+                )
+
         return
 
     # one-shot prompt mode
