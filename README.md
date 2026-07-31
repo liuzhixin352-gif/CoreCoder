@@ -142,6 +142,16 @@ Commit, stash, or discard existing changes before running the repair.
 `--allow-unverified-repository` does not bypass the Git worktree or
 cleanliness checks.
 
+### Dedicated repair branches
+
+After repository verification and the clean-worktree check succeed, every
+real Issue repair creates and switches to a dedicated Git branch before
+configuration, model, or Agent startup.
+
+Branch names use the Issue number and a normalized form of the title:
+
+```text
+devpilot/issue-21-fix-repository-scan-limit
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.

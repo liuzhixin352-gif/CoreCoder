@@ -12,6 +12,7 @@ from corecoder.github_issue import (
 )
 from corecoder.issue_task import IssueTask
 from corecoder.issue_workflow import IssueWorkflowError
+from corecoder.repair_branch import RepairBranchError
 from corecoder.repository_guard import (
     GitHubRepository,
     RepositoryGuardError,
@@ -371,6 +372,255 @@ def test_main_blocks_dirty_worktree_before_runtime(
     assert "corecoder/cli.py" in output
     assert "scratch.txt" in output
 
+def test_main_creates_repair_branch_before_runtime(
+    monkeypatch,
+):
+    task = _sample_task()
+    captured = {}
+    events = []
+    printed = []
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: task,
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+
+    def fake_check_worktree():
+        events.append("worktree")
+        return _worktree_preflight()
+
+    def fake_create_repair_branch(received_task):
+        assert received_task is task
+        assert events == ["worktree"]
+        events.append("branch")
+        return "devpilot/issue-21-fix-repository-scan-limit"
+
+    def fake_config_from_env(cls):
+        assert events == [
+            "worktree",
+            "branch",
+        ]
+        events.append("config")
+        return Config(
+            model="test-model",
+            api_key="test-api-key",
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        fake_check_worktree,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_branch",
+        fake_create_repair_branch,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.Config,
+        "from_env",
+        classmethod(fake_config_from_env),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "repair branch prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+    assert events == [
+        "worktree",
+        "branch",
+        "config",
+    ]
+    assert captured["prompt"] == "repair branch prompt"
+
+    output = "\n".join(printed)
+    assert "Repair branch created:" in output
+    assert (
+        "devpilot/issue-21-fix-repository-scan-limit"
+        in output
+    )
+
+
+def test_main_skips_repair_branch_in_dry_run(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_branch",
+        lambda issue_task: pytest.fail(
+            "Dry-run must not create a repair branch"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "dry-run branch prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--dry-run",
+        ],
+    )
+
+    cli.main()
+
+    assert captured["prompt"] == "dry-run branch prompt"
+
+
+def test_main_reports_repair_branch_error_before_runtime(
+    monkeypatch,
+):
+    task = _sample_task()
+    printed = []
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: task,
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(),
+    )
+
+    def fake_create_repair_branch(received_task):
+        raise RepairBranchError(
+            "unable to create repair branch"
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "create_repair_branch",
+        fake_create_repair_branch,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.Config,
+        "from_env",
+        classmethod(
+            lambda cls: pytest.fail(
+                "Configuration must not be loaded when "
+                "repair branch creation fails"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "LLM",
+        lambda **kwargs: pytest.fail(
+            "LLM must not be created when "
+            "repair branch creation fails"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "Agent",
+        lambda **kwargs: pytest.fail(
+            "Agent must not be created when "
+            "repair branch creation fails"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda *args, **kwargs: pytest.fail(
+            "Workflow must not run when "
+            "repair branch creation fails"
+        ),
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+    assert "Issue workflow error:" in output
+    assert "unable to create repair branch" in output
 
 def test_main_blocks_repair_outside_git_worktree(
     monkeypatch,
@@ -568,6 +818,14 @@ def _patch_runtime(
         cli,
         "check_worktree",
         lambda: _worktree_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_branch",
+        lambda issue_task: (
+            "devpilot/issue-21-fix-repository-scan-limit"
+        ),
+        raising=False,
     )
     monkeypatch.setattr(
         cli.Config,

@@ -137,6 +137,15 @@ git status --short
 如有现存修改，需要先提交、暂存到 stash 或丢弃这些修改。
 `--allow-unverified-repository` 不能绕过 Git 工作区检查或工作区清洁检查。
 
+### 专用修复分支
+
+仓库验证和工作区清洁检查通过后，每次真实 Issue 修复都会先创建并切换到
+一个专用 Git 分支，然后才会加载配置、创建模型和启动 Agent。
+
+分支名称由 Issue 编号和经过规范化处理的标题组成：
+
+```text
+devpilot/issue-21-fix-repository-scan-limit
 ## 读懂它：代码地图
 
 整个项目摊开就这么大，clone 之前扫一眼，心里就有数了。这也是它和 Claude Code 几十万行最实在的区别：你能把它当一本书的目录来读。建议从 `agent.py` 的主循环读起，那是整个 agent 的心脏。

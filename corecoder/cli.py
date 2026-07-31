@@ -24,6 +24,10 @@ from .issue_workflow import (
     IssueWorkflowError,
     build_issue_repair_prompt,
 )
+from .repair_branch import (
+    RepairBranchError,
+    create_repair_branch,
+)
 from .repository_guard import (
     RepositoryGuardError,
     check_issue_repository,
@@ -216,6 +220,13 @@ def main():
                         "before starting the repair."
                     )
                     sys.exit(1)
+                repair_branch = create_repair_branch(
+                    issue_task
+                )
+                console.print(
+                    "[green bold]Repair branch created:[/] "
+                    f"[cyan]{repair_branch}[/cyan]"
+                )
             issue_prompt = build_issue_repair_prompt(
                 issue_task,
                 dry_run=args.dry_run,
@@ -226,6 +237,7 @@ def main():
             GitHubIssueFetchError,
             IssueWorkflowError,
             RepositoryGuardError,
+            RepairBranchError,
         ) as error:
             console.print(
                 f"[red bold]Issue workflow error:[/] {error}"
