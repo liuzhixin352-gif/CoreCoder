@@ -146,6 +146,43 @@ git status --short
 
 ```text
 devpilot/issue-21-fix-repository-scan-limit
+```
+
+分支名称最长为 80 个字符。当标题不包含可用的 ASCII 字符时，DevPilot
+会退化为仅包含 Issue 编号的安全形式：
+
+```text
+devpilot/issue-21
+```
+
+只读分析模式不会创建或切换分支。如果分支创建失败，修复流程会在加载配置
+和启动 Agent 之前停止。
+
+### 修复结果摘要
+
+真实 Issue 修复完成后，DevPilot 会检查 Git 工作区，并输出专用修复分支
+以及所有已修改或未跟踪的文件：
+
+```text
+Post-repair summary
+Repair branch: devpilot/issue-21-fix-repository-scan-limit
+Changed files:
+   M corecoder/cli.py
+  ?? tests/test_example.py
+```
+
+Git porcelain 状态的前两个字符会被完整保留，因此可以区分暂存区修改、
+工作区修改、删除、重命名和未跟踪文件。
+
+当 Agent 没有产生任何仓库修改时，DevPilot 会明确输出：
+
+```text
+No repository changes were produced.
+```
+
+只读分析模式不会执行该检查，以保证整个流程保持只读。如果 Git 状态检查
+失败，DevPilot 会报告修复结果摘要错误，并以非零状态码退出。
+
 ## 读懂它：代码地图
 
 整个项目摊开就这么大，clone 之前扫一眼，心里就有数了。这也是它和 Claude Code 几十万行最实在的区别：你能把它当一本书的目录来读。建议从 `agent.py` 的主循环读起，那是整个 agent 的心脏。

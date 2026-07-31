@@ -12,6 +12,10 @@ from corecoder.github_issue import (
 )
 from corecoder.issue_task import IssueTask
 from corecoder.issue_workflow import IssueWorkflowError
+from corecoder.post_repair import (
+    PostRepairSummary,
+    PostRepairSummaryError,
+)
 from corecoder.repair_branch import RepairBranchError
 from corecoder.repository_guard import (
     GitHubRepository,
@@ -809,6 +813,280 @@ def test_main_skips_worktree_check_in_dry_run(
 
     assert captured["prompt"] == "dry-run prompt"
 
+def test_main_prints_post_repair_changes_after_repair(
+    monkeypatch,
+):
+    captured = {}
+    events = []
+    printed = []
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "post-repair prompt",
+    )
+
+    def fake_run_once(agent, prompt):
+        events.append("run")
+        captured["prompt"] = prompt
+
+    def fake_collect_post_repair_summary(branch):
+        assert events == ["run"]
+        events.append("summary")
+
+        return PostRepairSummary(
+            branch=branch,
+            changes=(
+                " M corecoder/cli.py",
+                "?? tests/test_example.py",
+            ),
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        fake_run_once,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        fake_collect_post_repair_summary,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+    assert events == [
+        "run",
+        "summary",
+    ]
+    assert captured["prompt"] == "post-repair prompt"
+
+    output = "\n".join(printed)
+    assert "Post-repair summary" in output
+    assert "Repair branch:" in output
+    assert (
+        "devpilot/issue-21-fix-repository-scan-limit"
+        in output
+    )
+    assert "Changed files:" in output
+    assert " M corecoder/cli.py" in output
+    assert "?? tests/test_example.py" in output
+
+
+def test_main_reports_when_repair_produces_no_changes(
+    monkeypatch,
+):
+    printed = []
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "no-change prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+    output = "\n".join(printed)
+    assert "Post-repair summary" in output
+    assert "No repository changes were produced." in output
+
+
+def test_main_skips_post_repair_summary_in_dry_run(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "dry-run summary prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: captured.update(
+            {"prompt": prompt}
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: pytest.fail(
+            "Dry-run must not collect a post-repair summary"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--dry-run",
+        ],
+    )
+
+    cli.main()
+
+    assert captured["prompt"] == "dry-run summary prompt"
+
+
+def test_main_reports_post_repair_summary_error(
+    monkeypatch,
+):
+    events = []
+    printed = []
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "summary error prompt",
+    )
+
+    def fake_run_once(agent, prompt):
+        events.append("run")
+
+    def fake_collect_post_repair_summary(branch):
+        assert events == ["run"]
+
+        raise PostRepairSummaryError(
+            "unable to inspect post-repair Git changes"
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        fake_run_once,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        fake_collect_post_repair_summary,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+    assert events == ["run"]
+
+    output = "\n".join(printed)
+    assert "Post-repair summary error:" in output
+    assert "unable to inspect post-repair Git changes" in output
+
 def _patch_runtime(
     monkeypatch,
     captured: dict | None = None,
@@ -824,6 +1102,15 @@ def _patch_runtime(
         "create_repair_branch",
         lambda issue_task: (
             "devpilot/issue-21-fix-repository-scan-limit"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(),
         ),
         raising=False,
     )
