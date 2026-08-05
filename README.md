@@ -223,11 +223,45 @@ Failed: 2
 
 Failed, interrupted, invalid, or empty test runs return a non-zero process
 status. The repair branch and its uncommitted changes are preserved for
-inspection; DevPilot does not automatically stage, commit, push, or discard
-them.
+inspection, and no repair commit is created.
 
 If pytest cannot be started or exceeds its execution timeout, DevPilot reports
 a post-repair validation error and exits with a non-zero status.
+
+### Automatic repair commits
+
+After mandatory validation succeeds, DevPilot stages the validated repair
+changes and creates a deterministic Git commit:
+
+```text
+Repair commit created
+Commit: 0123456789abcdef0123456789abcdef01234567
+Message: Fix #21: Fix repository scan limit
+```
+
+The commit is created only when all of the following are true:
+
+- the workflow is a real repair rather than a dry run;
+- the Agent produced repository changes;
+- mandatory post-repair validation passed;
+- the GitHub Issue number is available.
+
+The commit message uses this format:
+
+```text
+Fix #<Issue number>: <Issue title>
+```
+
+Whitespace in the Issue title is normalized. When the title is empty,
+DevPilot uses `GitHub Issue repair` as the fallback title.
+
+DevPilot runs `git add --all`, creates the commit, and reports its full SHA.
+It does not automatically push the branch or create a Pull Request.
+
+If staging, committing, or reading the resulting commit SHA fails, DevPilot
+reports a repair commit error and exits with a non-zero status. The dedicated
+repair branch and its current Git state are preserved for inspection.
+
 
 ## Read it: the code map
 

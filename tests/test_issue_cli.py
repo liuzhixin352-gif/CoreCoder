@@ -20,6 +20,10 @@ from corecoder.post_repair_validation import (
     PostRepairValidation,
     PostRepairValidationError,
 )
+from corecoder.repair_commit import (
+    RepairCommit,
+    RepairCommitError,
+)
 from corecoder.repair_branch import RepairBranchError
 from corecoder.repository_guard import (
     GitHubRepository,
@@ -1472,6 +1476,435 @@ def test_main_reports_post_repair_validation_execution_error(
     assert "Post-repair validation error:" in output
     assert "unable to run post-repair validation" in output
 
+def test_main_creates_commit_after_successful_validation(
+    monkeypatch,
+):
+    events = []
+    printed = []
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "commit prompt",
+    )
+
+    def fake_run_once(agent, prompt):
+        events.append("run")
+
+    def fake_collect_post_repair_summary(branch):
+        assert events == ["run"]
+        events.append("summary")
+
+        return PostRepairSummary(
+            branch=branch,
+            changes=(
+                " M corecoder/cli.py",
+            ),
+        )
+
+    def fake_run_post_repair_validation():
+        assert events == [
+            "run",
+            "summary",
+        ]
+        events.append("validation")
+
+        return PostRepairValidation(
+            command=(
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests",
+                "-q",
+            ),
+            status="passed",
+            exit_code=0,
+            passed_count=275,
+            failed_count=0,
+            error_count=0,
+            output="275 passed",
+        )
+
+    def fake_create_repair_commit(
+        issue_number,
+        issue_title,
+    ):
+        assert events == [
+            "run",
+            "summary",
+            "validation",
+        ]
+        assert issue_number == 21
+        assert issue_title == "Fix repository scan limit"
+
+        events.append("commit")
+
+        return RepairCommit(
+            sha=commit_sha,
+            message=(
+                "Fix #21: Fix repository scan limit"
+            ),
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        fake_run_once,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        fake_collect_post_repair_summary,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_post_repair_validation",
+        fake_run_post_repair_validation,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        fake_create_repair_commit,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+    assert events == [
+        "run",
+        "summary",
+        "validation",
+        "commit",
+    ]
+
+    output = "\n".join(printed)
+    assert "Repair commit created" in output
+    assert "Commit:" in output
+    assert commit_sha in output
+    assert "Message:" in output
+    assert (
+        "Fix #21: Fix repository scan limit"
+        in output
+    )
+
+
+def test_main_skips_repair_commit_without_changes(
+    monkeypatch,
+):
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "no-change commit prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        lambda *args, **kwargs: pytest.fail(
+            "Commit must not run without changes"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+
+def test_main_skips_repair_commit_in_dry_run(
+    monkeypatch,
+):
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "dry-run commit prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        lambda *args, **kwargs: pytest.fail(
+            "Dry-run must not create a commit"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--dry-run",
+        ],
+    )
+
+    cli.main()
+
+
+def test_main_skips_repair_commit_when_validation_fails(
+    monkeypatch,
+):
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "failed validation commit prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(
+                " M corecoder/cli.py",
+            ),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_post_repair_validation",
+        lambda: PostRepairValidation(
+            command=(
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests",
+                "-q",
+            ),
+            status="failed",
+            exit_code=1,
+            passed_count=10,
+            failed_count=2,
+            error_count=0,
+            output="2 failed, 10 passed",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        lambda *args, **kwargs: pytest.fail(
+            "Failed validation must not create a commit"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+
+def test_main_reports_repair_commit_error(
+    monkeypatch,
+):
+    printed = []
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "commit error prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(
+                " M corecoder/cli.py",
+            ),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_post_repair_validation",
+        lambda: PostRepairValidation(
+            command=(
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests",
+                "-q",
+            ),
+            status="passed",
+            exit_code=0,
+            passed_count=275,
+            failed_count=0,
+            error_count=0,
+            output="275 passed",
+        ),
+        raising=False,
+    )
+
+    def fake_create_repair_commit(
+        issue_number,
+        issue_title,
+    ):
+        raise RepairCommitError(
+            "unable to commit repair changes: "
+            "pre-commit hook failed"
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        fake_create_repair_commit,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+    assert "Repair commit error:" in output
+    assert "unable to commit repair changes" in output
+    assert "pre-commit hook failed" in output
 
 def _patch_runtime(
     monkeypatch,
@@ -1517,6 +1950,22 @@ def _patch_runtime(
             failed_count=0,
             error_count=0,
             output="264 passed",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        lambda issue_number, issue_title: RepairCommit(
+            sha=(
+                "0123456789abcdef"
+                "0123456789abcdef"
+                "01234567"
+            ),
+            message=(
+                f"Fix #{issue_number}: "
+                f"{issue_title}"
+            ),
         ),
         raising=False,
     )
