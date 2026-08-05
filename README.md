@@ -256,18 +256,29 @@ Whitespace in the Issue title is normalized. When the title is empty,
 DevPilot uses `GitHub Issue repair` as the fallback title.
 
 DevPilot runs `git add --all`, creates the commit, and reports its full SHA.
-It does not automatically push the branch or create a Pull Request.
+It does not automatically create a Pull Request.
 
 If staging, committing, or reading the resulting commit SHA fails, DevPilot
 reports a repair commit error and exits with a non-zero status. The dedicated
 repair branch and its current Git state are preserved for inspection.
 
+### Automatic repair branch pushes
 
+After the validated repair commit is created, DevPilot verifies that the
+dedicated local repair branch still points to that exact commit and pushes
+the branch to `origin`:
+
+```text
+Repair branch pushed
+Remote: origin
+Branch: devpilot/issue-21-fix-repository-scan-limit
+Commit: 0123456789abcdef0123456789abcdef01234567
+```
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.
 
-```
+```text
 corecoder/
 ├── agent.py        agent loop + parallel tool exec       150 lines   ← start here
 ├── llm.py          streaming client + retry + cost        336 lines
