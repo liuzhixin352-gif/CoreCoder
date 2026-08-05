@@ -36,6 +36,10 @@ from .repair_commit import (
     RepairCommitError,
     create_repair_commit,
 )
+from .repair_push import (
+    RepairPushError,
+    push_repair_branch,
+)
 from .repair_branch import (
     RepairBranchError,
     create_repair_branch,
@@ -468,6 +472,34 @@ def main():
                 console.print(
                     "[bold]Message:[/] "
                     f"{repair_commit.message}"
+                )
+                try:
+                    repair_push = push_repair_branch(
+                        repair_branch,
+                        repair_commit.sha,
+                    )
+                except RepairPushError as error:
+                    console.print(
+                        "[red bold]Repair push error:[/] "
+                        f"{error}"
+                    )
+                    sys.exit(1)
+
+                console.print()
+                console.print(
+                    "[green bold]Repair branch pushed[/]"
+                )
+                console.print(
+                    "[bold]Remote:[/] "
+                    f"[cyan]{repair_push.remote}[/cyan]"
+                )
+                console.print(
+                    "[bold]Branch:[/] "
+                    f"[cyan]{repair_push.branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_push.commit_sha}[/cyan]"
                 )
             else:
                 console.print(

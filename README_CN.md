@@ -248,17 +248,28 @@ Issue 标题中的连续空白字符会被规范化。当标题为空时，DevPi
 `GitHub Issue repair` 作为后备标题。
 
 DevPilot 会执行 `git add --all`、创建提交并输出完整提交 SHA。它不会
-自动推送分支，也不会自动创建 Pull Request。
+自动创建 Pull Request。
 
 如果暂存、提交或读取最终提交 SHA 失败，DevPilot 会报告修复提交错误，
 并以非零状态码退出。专用修复分支及其当前 Git 状态会被保留，方便人工检查。
 
+### 自动推送修复分支
+
+创建经过验证的修复提交后，DevPilot 会确认本地专用修复分支仍然准确指向
+该提交，然后将分支推送到 `origin`：
+
+```text
+Repair branch pushed
+Remote: origin
+Branch: devpilot/issue-21-fix-repository-scan-limit
+Commit: 0123456789abcdef0123456789abcdef01234567
+```
 
 ## 读懂它：代码地图
 
 整个项目摊开就这么大，clone 之前扫一眼，心里就有数了。这也是它和 Claude Code 几十万行最实在的区别：你能把它当一本书的目录来读。建议从 `agent.py` 的主循环读起，那是整个 agent 的心脏。
 
-```
+```text
 corecoder/
 ├── agent.py        agent 主循环 + 并行工具执行       150 行   ← 从这里开始读
 ├── llm.py          流式客户端 + 重试 + 成本统计       336 行
