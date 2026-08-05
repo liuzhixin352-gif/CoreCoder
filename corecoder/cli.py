@@ -32,6 +32,10 @@ from .post_repair_validation import (
     PostRepairValidationError,
     run_post_repair_validation,
 )
+from .repair_commit import (
+    RepairCommitError,
+    create_repair_commit,
+)
 from .repair_branch import (
     RepairBranchError,
     create_repair_branch,
@@ -433,6 +437,38 @@ def main():
 
                 if not post_repair_validation.passed:
                     sys.exit(1)
+
+                if issue_task.issue_number is None:
+                    console.print(
+                        "[red bold]Repair commit error:[/] "
+                        "GitHub Issue number is unavailable."
+                    )
+                    sys.exit(1)
+
+                try:
+                    repair_commit = create_repair_commit(
+                        issue_task.issue_number,
+                        issue_task.title,
+                    )
+                except RepairCommitError as error:
+                    console.print(
+                        "[red bold]Repair commit error:[/] "
+                        f"{error}"
+                    )
+                    sys.exit(1)
+
+                console.print()
+                console.print(
+                    "[green bold]Repair commit created[/]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_commit.sha}[/cyan]"
+                )
+                console.print(
+                    "[bold]Message:[/] "
+                    f"{repair_commit.message}"
+                )
             else:
                 console.print(
                     "[yellow]"

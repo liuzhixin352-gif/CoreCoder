@@ -214,11 +214,45 @@ Failed: 2
 ```
 
 测试失败、被中断、配置无效或没有发现测试时，程序都会以非零状态码退出。
-专用修复分支及其中尚未提交的修改会被保留，方便人工检查；DevPilot 不会
-自动暂存、提交、推送或丢弃这些修改。
+专用修复分支及其中尚未提交的修改会被保留，方便人工检查，并且不会创建
+修复提交。
 
 如果 pytest 无法启动或超过执行超时时间，DevPilot 会报告修复后验证错误，
 并以非零状态码退出。
+
+### 自动创建修复提交
+
+强制修复后验证通过后，DevPilot 会暂存已经验证的修复内容，并创建一个
+确定性的 Git 提交：
+
+```text
+Repair commit created
+Commit: 0123456789abcdef0123456789abcdef01234567
+Message: Fix #21: Fix repository scan limit
+```
+
+只有同时满足以下条件时才会创建提交：
+
+- 当前流程是真实修复，而不是只读分析；
+- Agent 产生了仓库修改；
+- 强制修复后验证已经通过；
+- GitHub Issue 编号可用。
+
+提交信息使用以下格式：
+
+```text
+Fix #<Issue 编号>: <Issue 标题>
+```
+
+Issue 标题中的连续空白字符会被规范化。当标题为空时，DevPilot 使用
+`GitHub Issue repair` 作为后备标题。
+
+DevPilot 会执行 `git add --all`、创建提交并输出完整提交 SHA。它不会
+自动推送分支，也不会自动创建 Pull Request。
+
+如果暂存、提交或读取最终提交 SHA 失败，DevPilot 会报告修复提交错误，
+并以非零状态码退出。专用修复分支及其当前 Git 状态会被保留，方便人工检查。
+
 
 ## 读懂它：代码地图
 
@@ -339,6 +373,8 @@ DevPilot 可以读取真实的 GitHub Issue，确认它是否属于当前仓库�
 
 ```bash
 corecoder --issue https://github.com/owner/repository/issues/12 --dry-run
+```
+
 ## 相关项目
 
 如果你读 CoreCoder 读得还顺，下面几个我做的 agent / LLM 系统方向的工具也许用得上：
