@@ -247,8 +247,7 @@ Fix #<Issue 编号>: <Issue 标题>
 Issue 标题中的连续空白字符会被规范化。当标题为空时，DevPilot 使用
 `GitHub Issue repair` 作为后备标题。
 
-DevPilot 会执行 `git add --all`、创建提交并输出完整提交 SHA。它不会
-自动创建 Pull Request。
+DevPilot 会执行 `git add --all`、创建提交并输出完整提交 SHA。
 
 如果暂存、提交或读取最终提交 SHA 失败，DevPilot 会报告修复提交错误，
 并以非零状态码退出。专用修复分支及其当前 Git 状态会被保留，方便人工检查。
@@ -264,6 +263,18 @@ Remote: origin
 Branch: devpilot/issue-21-fix-repository-scan-limit
 Commit: 0123456789abcdef0123456789abcdef01234567
 ```
+### 自动创建修复 Pull Request
+
+经过验证的修复分支成功推送后，DevPilot 会自动创建 GitHub Pull Request，
+将专用修复分支合并到修复开始前检出的基础分支。
+
+```text
+Repair pull request created
+Pull request: #42
+URL: https://github.com/owner/repository/pull/42
+Base: devpilot-v1
+Head: devpilot/issue-21-fix-repository-scan-limit
+Commit: 0123456789abcdef0123456789abcdef01234567
 
 ## 读懂它：代码地图
 

@@ -8,6 +8,7 @@ from corecoder.repair_branch import (
     RepairBranchError,
     build_repair_branch_name,
     create_repair_branch,
+    get_current_branch,
 )
 
 
@@ -22,6 +23,94 @@ def _task(
         issue_number=issue_number,
     )
 
+def test_get_current_branch_reads_checked_out_branch(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+
+        return subprocess.CompletedProcess(
+            command,
+            returncode=0,
+            stdout="devpilot-v1\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        repair_branch.subprocess,
+        "run",
+        fake_run,
+    )
+
+    result = get_current_branch()
+
+    assert result == "devpilot-v1"
+    assert calls == [
+        (
+            [
+                "git",
+                "branch",
+                "--show-current",
+            ],
+            {
+                "cwd": None,
+                "capture_output": True,
+                "text": True,
+                "encoding": "utf-8",
+                "errors": "replace",
+                "timeout": 10,
+                "check": False,
+            },
+        )
+    ]
+
+def test_get_current_branch_reports_git_failure(
+    monkeypatch,
+):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            returncode=128,
+            stdout="",
+            stderr="fatal: not a git repository",
+        )
+
+    monkeypatch.setattr(
+        repair_branch.subprocess,
+        "run",
+        fake_run,
+    )
+
+    with pytest.raises(
+        RepairBranchError,
+        match="unable to read current Git branch",
+    ):
+        get_current_branch()
+
+def test_get_current_branch_rejects_detached_head(
+    monkeypatch,
+):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            returncode=0,
+            stdout="\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        repair_branch.subprocess,
+        "run",
+        fake_run,
+    )
+
+    with pytest.raises(
+        RepairBranchError,
+        match="current Git checkout is not on a branch",
+    ):
+        get_current_branch()
 
 def test_build_repair_branch_name_uses_number_and_title():
     result = build_repair_branch_name(_task())

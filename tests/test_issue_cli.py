@@ -28,7 +28,10 @@ from corecoder.repair_push import (
     RepairPush,
     RepairPushError,
 )
-
+from corecoder.repair_pr import (
+    RepairPullRequest,
+    RepairPullRequestError,
+)
 from corecoder.repair_branch import RepairBranchError
 from corecoder.repository_guard import (
     GitHubRepository,
@@ -414,15 +417,26 @@ def test_main_creates_repair_branch_before_runtime(
         events.append("worktree")
         return _worktree_preflight()
 
+    def fake_get_current_branch():
+        assert events == [
+            "worktree",
+        ]
+        events.append("base_branch")
+        return "devpilot-v1"
+
     def fake_create_repair_branch(received_task):
         assert received_task is task
-        assert events == ["worktree"]
+        assert events == [
+        "worktree",
+        "base_branch",
+        ]
         events.append("branch")
         return "devpilot/issue-21-fix-repository-scan-limit"
 
     def fake_config_from_env(cls):
         assert events == [
             "worktree",
+            "base_branch",
             "branch",
         ]
         events.append("config")
@@ -435,6 +449,12 @@ def test_main_creates_repair_branch_before_runtime(
         cli,
         "check_worktree",
         fake_check_worktree,
+    )
+    monkeypatch.setattr(
+    cli,
+    "get_current_branch",
+    fake_get_current_branch,
+    raising=False,
     )
     monkeypatch.setattr(
         cli,
@@ -480,6 +500,7 @@ def test_main_creates_repair_branch_before_runtime(
 
     assert events == [
         "worktree",
+        "base_branch",
         "branch",
         "config",
     ]
@@ -1738,6 +1759,48 @@ def test_main_pushes_repair_branch_after_commit(
             commit_sha=received_commit_sha,
         )
 
+    def fake_create_repair_pull_request(
+    repository,
+    issue_number,
+    issue_title,
+    received_repair_push,
+    base_branch,
+    ):
+        assert events == [
+            "run",
+            "summary",
+            "validation",
+            "commit",
+            "push",
+        ]
+        assert repository == "example/project"
+        assert issue_number == 21
+        assert issue_title == "Fix repository scan limit"
+        assert received_repair_push == RepairPush(
+            remote="origin",
+            branch=branch,
+            commit_sha=commit_sha,
+        )
+        assert base_branch == "devpilot-v1"
+
+        events.append("pull_request")
+
+        return RepairPullRequest(
+            repository=repository,
+            number=42,
+            url=(
+                "https://github.com/"
+                "example/project/pull/42"
+            ),
+            title=(
+                "Fix #21: "
+                "Fix repository scan limit"
+            ),
+            base_branch=base_branch,
+            head_branch=branch,
+            commit_sha=commit_sha,
+        )
+
     monkeypatch.setattr(
         cli,
         "_run_once",
@@ -1768,6 +1831,19 @@ def test_main_pushes_repair_branch_after_commit(
         raising=False,
     )
     monkeypatch.setattr(
+    cli,
+    "create_repair_pull_request",
+    fake_create_repair_pull_request,
+    raising=False,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
+    )
+    monkeypatch.setattr(
         cli.console,
         "print",
         lambda *args, **kwargs: printed.append(
@@ -1792,9 +1868,22 @@ def test_main_pushes_repair_branch_after_commit(
         "validation",
         "commit",
         "push",
+        "pull_request",
     ]
-
     output = "\n".join(printed)
+
+    assert "Repair pull request created" in output
+    assert "Pull request:" in output
+    assert "#42" in output
+    assert "URL:" in output
+    assert (
+        "https://github.com/example/project/pull/42"
+        in output
+    )
+    assert "Base:" in output
+    assert "devpilot-v1" in output
+    assert "Head:" in output
+
     assert "Repair branch pushed" in output
     assert "Remote:" in output
     assert "origin" in output
@@ -1802,6 +1891,8 @@ def test_main_pushes_repair_branch_after_commit(
     assert branch in output
     assert "Commit:" in output
     assert commit_sha in output
+
+
 
 def test_main_reports_repair_push_error(
     monkeypatch,
@@ -1857,6 +1948,15 @@ def test_main_reports_repair_push_error(
         fake_push_repair_branch,
         raising=False,
     )
+
+
+
+    monkeypatch.setattr(
+    cli,
+    "get_current_branch",
+    lambda: "devpilot-v1",
+    raising=False,
+    )
     monkeypatch.setattr(
         cli.console,
         "print",
@@ -1883,6 +1983,108 @@ def test_main_reports_repair_push_error(
     assert "Repair push error:" in output
     assert "unable to push repair branch" in output
     assert "connection was reset" in output
+
+def test_main_reports_repair_pull_request_error(
+    monkeypatch,
+):
+    printed = []
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "pull request error prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(
+                " M corecoder/cli.py",
+            ),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
+    )
+
+    def fake_create_repair_pull_request(
+        repository,
+        issue_number,
+        issue_title,
+        repair_push,
+        base_branch,
+    ):
+        assert repository == "example/project"
+        assert issue_number == 21
+        assert issue_title == "Fix repository scan limit"
+        assert repair_push.remote == "origin"
+        assert repair_push.branch == (
+            "devpilot/"
+            "issue-21-fix-repository-scan-limit"
+        )
+        assert base_branch == "devpilot-v1"
+
+        raise RepairPullRequestError(
+            "GitHub API request failed with "
+            "HTTP status 422"
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "create_repair_pull_request",
+        fake_create_repair_pull_request,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+    assert "Repair branch pushed" in output
+    assert "Repair pull request error:" in output
+    assert "GitHub API request failed" in output
+    assert "HTTP status 422" in output
+    assert "Repair pull request created" not in output
 
 def test_main_skips_repair_commit_without_changes(
     monkeypatch,
@@ -2172,6 +2374,29 @@ def _patch_runtime(
     captured: dict | None = None,
 ) -> None:
     """Replace configuration, LLM, and Agent construction."""
+    def fake_create_repair_pull_request(
+        repository,
+        issue_number,
+        issue_title,
+        repair_push,
+        base_branch,
+    ):
+            return RepairPullRequest(
+                repository=repository,
+                number=42,
+                url=(
+                    f"https://github.com/"
+                    f"{repository}/pull/42"
+                ),
+                title=(
+                    f"Fix #{issue_number}: "
+                    f"{issue_title}"
+                ),
+                base_branch=base_branch,
+                head_branch=repair_push.branch,
+                commit_sha=repair_push.commit_sha,
+            )
+
     monkeypatch.setattr(
         cli,
         "check_worktree",
@@ -2238,6 +2463,12 @@ def _patch_runtime(
         branch=branch,
         commit_sha=commit_sha,
     ),
+    raising=False,
+    )
+    monkeypatch.setattr(
+    cli,
+    "create_repair_pull_request",
+    fake_create_repair_pull_request,
     raising=False,
     )
     monkeypatch.setattr(
