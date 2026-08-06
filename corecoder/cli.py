@@ -43,12 +43,18 @@ from .repair_push import (
 from .repair_branch import (
     RepairBranchError,
     create_repair_branch,
+    get_current_branch,
 )
 from .repository_guard import (
     RepositoryGuardError,
     check_issue_repository,
     check_worktree,
 )
+from .repair_pr import (
+    RepairPullRequestError,
+    create_repair_pull_request,
+)
+
 from .session import save_session, load_session, list_sessions
 from . import __version__
 
@@ -146,6 +152,7 @@ def main():
     issue_prompt = None
     repository_preflight = None
     repair_branch = None
+    repair_base_branch = None
 
 
     if args.issue:
@@ -237,6 +244,7 @@ def main():
                         "before starting the repair."
                     )
                     sys.exit(1)
+                repair_base_branch = get_current_branch()
                 repair_branch = create_repair_branch(
                     issue_task
                 )
@@ -355,6 +363,7 @@ def main():
 
         if not args.dry_run:
             assert repair_branch is not None
+            assert repair_base_branch is not None
 
             try:
                 post_repair_summary = (
@@ -469,6 +478,7 @@ def main():
                     "[bold]Commit:[/] "
                     f"[cyan]{repair_commit.sha}[/cyan]"
                 )
+
                 console.print(
                     "[bold]Message:[/] "
                     f"{repair_commit.message}"
@@ -500,6 +510,47 @@ def main():
                 console.print(
                     "[bold]Commit:[/] "
                     f"[cyan]{repair_push.commit_sha}[/cyan]"
+                )
+                try:
+                    repair_pull_request = (
+                        create_repair_pull_request(
+                            repository_preflight.target.full_name,
+                            issue_task.issue_number,
+                            issue_task.title,
+                            repair_push,
+                            repair_base_branch,
+                        )
+                    )
+                except RepairPullRequestError as error:
+                    console.print(
+                        "[red bold]Repair pull request error:[/] "
+                        f"{error}"
+                    )
+                    sys.exit(1)
+
+                console.print()
+                console.print(
+                    "[green bold]Repair pull request created[/]"
+                )
+                console.print(
+                    "[bold]Pull request:[/] "
+                    f"[cyan]#{repair_pull_request.number}[/cyan]"
+                )
+                console.print(
+                    "[bold]URL:[/] "
+                    f"[cyan]{repair_pull_request.url}[/cyan]"
+                )
+                console.print(
+                    "[bold]Base:[/] "
+                    f"[cyan]{repair_pull_request.base_branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Head:[/] "
+                    f"[cyan]{repair_pull_request.head_branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_pull_request.commit_sha}[/cyan]"
                 )
             else:
                 console.print(

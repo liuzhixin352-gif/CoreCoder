@@ -52,6 +52,55 @@ def build_repair_branch_name(
 
     return f"{prefix}-{slug}"
 
+def get_current_branch(
+    cwd: str | Path | None = None,
+    *,
+    timeout: int = 10,
+) -> str:
+    """Return the currently checked-out Git branch."""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "branch",
+                "--show-current",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        raise RepairBranchError(
+            "unable to read current Git branch"
+        ) from error
+
+    if result.returncode != 0:
+        detail = (
+            result.stderr.strip()
+            or result.stdout.strip()
+        )
+        message = "unable to read current Git branch"
+
+        if detail:
+            message = f"{message}: {detail}"
+
+        raise RepairBranchError(message)
+
+    branch = result.stdout.strip()
+
+    if not branch:
+        raise RepairBranchError(
+            "current Git checkout is not on a branch"
+        )
+
+    return branch
 
 def create_repair_branch(
     issue_task: IssueTask,

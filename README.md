@@ -256,7 +256,6 @@ Whitespace in the Issue title is normalized. When the title is empty,
 DevPilot uses `GitHub Issue repair` as the fallback title.
 
 DevPilot runs `git add --all`, creates the commit, and reports its full SHA.
-It does not automatically create a Pull Request.
 
 If staging, committing, or reading the resulting commit SHA fails, DevPilot
 reports a repair commit error and exits with a non-zero status. The dedicated
@@ -274,6 +273,21 @@ Remote: origin
 Branch: devpilot/issue-21-fix-repository-scan-limit
 Commit: 0123456789abcdef0123456789abcdef01234567
 ```
+
+### Automatic repair pull requests
+
+After the validated repair branch is pushed successfully, DevPilot creates a
+GitHub Pull Request from the dedicated repair branch to the branch that was
+checked out before the repair started.
+
+```text
+Repair pull request created
+Pull request: #42
+URL: https://github.com/owner/repository/pull/42
+Base: devpilot-v1
+Head: devpilot/issue-21-fix-repository-scan-limit
+Commit: 0123456789abcdef0123456789abcdef01234567
+
 ## Read it: the code map
 
 Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.
