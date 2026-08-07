@@ -275,6 +275,24 @@ URL: https://github.com/owner/repository/pull/42
 Base: devpilot-v1
 Head: devpilot/issue-21-fix-repository-scan-limit
 Commit: 0123456789abcdef0123456789abcdef01234567
+```
+
+### 查询修复 Pull Request 的 CI 状态
+
+创建 Pull Request 后，DevPilot 会查询修复提交最新的 GitHub check runs，
+并显示它们的综合状态。
+
+```text
+Repair CI status
+State: success
+Check runs:
+  tests: completed / success
+    URL: https://github.com/owner/repository/actions/runs/1
+```
+
+没有可用 check run 时显示 `no_checks`；存在尚未完成的 check run 时显示
+`pending`；所有检查均已完成但存在未成功结果时显示 `failure`。
+
 
 ## 读懂它：代码地图
 

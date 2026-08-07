@@ -287,6 +287,25 @@ URL: https://github.com/owner/repository/pull/42
 Base: devpilot-v1
 Head: devpilot/issue-21-fix-repository-scan-limit
 Commit: 0123456789abcdef0123456789abcdef01234567
+```
+
+### Repair pull request CI status
+
+After creating the Pull Request, DevPilot queries the latest GitHub check runs
+for the repair commit and displays their combined state.
+
+```text
+Repair CI status
+State: success
+Check runs:
+  tests: completed / success
+    URL: https://github.com/owner/repository/actions/runs/1
+```
+
+A repair commit with no available check runs is reported as `no_checks`.
+Incomplete check runs are reported as `pending`, while completed unsuccessful
+check runs are reported as `failure`.
+
 
 ## Read it: the code map
 
