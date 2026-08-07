@@ -821,3 +821,49 @@ def test_wait_for_repair_ci_status_caps_sleep_to_remaining_timeout(
         ("example/project", commit_sha),
     ]
     assert sleep_calls == [4.0]
+
+def test_build_repair_ci_failure_prompt_includes_failed_checks():
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+    ci_status = repair_ci.RepairCIStatus(
+        repository="example/project",
+        commit_sha=commit_sha,
+        state="failure",
+        check_runs=(
+            repair_ci.RepairCheckRun(
+                name="tests",
+                status="completed",
+                conclusion="failure",
+                details_url=(
+                    "https://github.com/"
+                    "example/project/actions/runs/1"
+                ),
+            ),
+            repair_ci.RepairCheckRun(
+                name="lint",
+                status="completed",
+                conclusion="success",
+                details_url=None,
+            ),
+        ),
+    )
+
+    prompt = repair_ci.build_repair_ci_failure_prompt(
+        ci_status
+    )
+
+    assert "remote CI failed" in prompt
+    assert "example/project" in prompt
+    assert commit_sha in prompt
+    assert "tests" in prompt
+    assert "failure" in prompt
+    assert (
+        "https://github.com/"
+        "example/project/actions/runs/1"
+        in prompt
+    )
+    assert "lint" not in prompt
+    assert "Fix the repository" in prompt

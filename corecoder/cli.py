@@ -57,6 +57,7 @@ from .repair_pr import (
 from .repair_ci import (
     RepairCIStatusError,
     wait_for_repair_ci_status,
+    build_repair_ci_failure_prompt,
 )
 
 from .session import save_session, load_session, list_sessions
@@ -605,7 +606,135 @@ def main():
                         "  [dim]No check runs found[/dim]"
                     )
                 if repair_ci_status.state == "failure":
-                    sys.exit(1)
+                    ci_failure_prompt = (
+                        build_repair_ci_failure_prompt(
+                            repair_ci_status
+                        )
+                    )
+                    _run_once(agent, ci_failure_prompt)
+
+                    try:
+                        ci_repair_summary = (
+                            collect_post_repair_summary(
+                                repair_branch
+                            )
+                        )
+                    except PostRepairSummaryError as error:
+                        console.print(
+                            "[red bold]"
+                            "Post-repair summary error:"
+                            "[/] "
+                            f"{error}"
+                        )
+                        sys.exit(1)
+
+                    if ci_repair_summary.has_changes:
+                        try:
+                            ci_repair_validation = (
+                                run_post_repair_validation()
+                            )
+                        except PostRepairValidationError as error:
+                            console.print(
+                                "[red bold]"
+                                "Post-repair validation error:"
+                                "[/] "
+                                f"{error}"
+                            )
+                            sys.exit(1)
+
+                        if not ci_repair_validation.passed:
+                            sys.exit(1)
+
+                        if issue_task.issue_number is None:
+                            console.print(
+                                "[red bold]Repair commit error:[/] "
+                                "GitHub Issue number is unavailable."
+                            )
+                            sys.exit(1)
+                        try:
+                            ci_repair_commit = (
+                                create_repair_commit(
+                                    issue_task.issue_number,
+                                    issue_task.title,
+                                )
+                            )
+                        except RepairCommitError as error:
+                            console.print(
+                                "[red bold]Repair commit error:[/] "
+                                f"{error}"
+                            )
+                            sys.exit(1)
+
+                        try:
+                            ci_repair_push = push_repair_branch(
+                                repair_branch,
+                                ci_repair_commit.sha,
+                            )
+                        except RepairPushError as error:
+                            console.print(
+                                "[red bold]Repair push error:[/] "
+                                f"{error}"
+                            )
+                            sys.exit(1)
+
+                        try:
+                            ci_repair_status = wait_for_repair_ci_status(
+                                repair_pull_request.repository,
+                                ci_repair_push.commit_sha,
+                            )
+                        except RepairCIStatusError as error:
+                            console.print(
+                                "[red bold]Repair CI status error:[/] "
+                                f"{error}"
+                            )
+                            sys.exit(1)
+
+                        console.print()
+                        console.print(
+                            "[green bold]Repair CI retry status[/]"
+                        )
+                        console.print(
+                            "[bold]State:[/] "
+                            f"[cyan]{ci_repair_status.state}[/cyan]"
+                        )
+                        console.print(
+                            "[bold]Check runs:[/]"
+                        )
+
+                        if ci_repair_status.check_runs:
+                            for check_run in ci_repair_status.check_runs:
+                                conclusion = (
+                                    check_run.conclusion
+                                    if check_run.conclusion is not None
+                                    else "-"
+                                )
+                                console.print(
+                                    "  "
+                                    f"[cyan]{check_run.name}[/cyan]: "
+                                    f"{check_run.status} / "
+                                    f"{conclusion}"
+                                )
+
+                                if check_run.details_url is not None:
+                                    console.print(
+                                        "    "
+                                        "[bold]URL:[/] "
+                                        f"[cyan]{check_run.details_url}[/cyan]"
+                                    )
+                        else:
+                            console.print(
+                                "  [dim]No check runs found[/dim]"
+                            )
+
+                        if ci_repair_status.state == "failure":
+                            sys.exit(1)
+                    else:
+                        console.print(
+                            "[red bold]"
+                            "CI repair produced no repository changes."
+                            "[/]"
+                        )
+                        sys.exit(1)
 
             else:
                 console.print(

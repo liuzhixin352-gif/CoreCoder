@@ -1,4 +1,4 @@
-"""Tests for the GitHub Issue CLI workflow."""
+"""Tests for the GtHub Issue CLI workflow."""
 
 import sys
 
@@ -3741,10 +3741,32 @@ def test_main_skips_repair_push_when_commit_fails(
     assert error.value.code == 1
 
 
-def test_main_exits_with_error_when_repair_ci_fails(
+@pytest.mark.parametrize(
+    (
+        "retry_state",
+        "retry_has_changes",
+        "expected_exit_code",
+    ),
+    [
+        ("success", True, None),
+        ("failure", True, 1),
+        ("success", False, 1),
+    ],
+)
+def test_main_handles_repair_ci_retry_result(
     monkeypatch,
+    retry_state,
+    retry_has_changes,
+    expected_exit_code,
 ):
     printed = []
+    prompts = []
+    summary_branches = []
+    validation_calls = []
+    commit_calls = []
+    push_calls = []
+    ci_wait_calls = []
+
     commit_sha = (
         "0123456789abcdef"
         "0123456789abcdef"
@@ -3752,6 +3774,7 @@ def test_main_exits_with_error_when_repair_ci_fails(
     )
 
     _patch_runtime(monkeypatch)
+    default_push_repair_branch = cli.push_repair_branch
 
     monkeypatch.setattr(
         cli,
@@ -3766,24 +3789,52 @@ def test_main_exits_with_error_when_repair_ci_fails(
     monkeypatch.setattr(
         cli,
         "build_issue_repair_prompt",
-        lambda *args, **kwargs: "CI failure prompt",
+        lambda *args, **kwargs: "Initial issue repair prompt",
+    )
+
+    def fake_build_repair_ci_failure_prompt(ci_status):
+        assert ci_status.state == "failure"
+        assert ci_status.repository == "example/project"
+        assert ci_status.commit_sha == commit_sha
+        return "Remote CI failure repair prompt"
+
+    monkeypatch.setattr(
+        cli,
+        "build_repair_ci_failure_prompt",
+        fake_build_repair_ci_failure_prompt,
+        raising=False,
     )
     monkeypatch.setattr(
         cli,
         "_run_once",
-        lambda agent, prompt: None,
+        lambda agent, prompt: prompts.append(prompt),
     )
+    def fake_collect_post_repair_summary(branch):
+            summary_branches.append(branch)
+
+            if (
+                len(summary_branches) == 2
+                and not retry_has_changes
+            ):
+                return PostRepairSummary(
+                    branch=branch,
+                    changes=(),
+                )
+
+            return PostRepairSummary(
+                branch=branch,
+                changes=(
+                    " M corecoder/cli.py",
+                ),
+            )
+
     monkeypatch.setattr(
         cli,
         "collect_post_repair_summary",
-        lambda branch: PostRepairSummary(
-            branch=branch,
-            changes=(
-                " M corecoder/cli.py",
-            ),
-        ),
+        fake_collect_post_repair_summary,
         raising=False,
     )
+
     monkeypatch.setattr(
         cli,
         "get_current_branch",
@@ -3791,25 +3842,112 @@ def test_main_exits_with_error_when_repair_ci_fails(
         raising=False,
     )
 
-    def fake_wait_for_repair_ci_status(
-        repository,
-        received_commit_sha,
+    def fake_run_post_repair_validation():
+        validation_calls.append("validation")
+        return PostRepairValidation(
+            command=(
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests",
+                "-q",
+            ),
+            status="passed",
+            exit_code=0,
+            passed_count=342,
+            failed_count=0,
+            error_count=0,
+            output="342 passed",
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "run_post_repair_validation",
+        fake_run_post_repair_validation,
+    )
+
+    def fake_create_repair_commit(
+    issue_number,
+    issue_title,
     ):
+        commit_calls.append(
+            (issue_number, issue_title)
+        )
+        return RepairCommit(
+            sha=commit_sha,
+            message=(
+                f"Fix #{issue_number}: "
+                f"{issue_title}"
+            ),
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "create_repair_commit",
+        fake_create_repair_commit,
+        raising=False,
+    )
+
+    def fake_push_repair_branch(
+    branch,
+    received_commit_sha,
+    ):
+        push_calls.append(
+            (branch, received_commit_sha)
+        )
+        return default_push_repair_branch(
+            branch,
+            received_commit_sha,
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "push_repair_branch",
+        fake_push_repair_branch,
+        raising=False,
+    )
+
+    def fake_wait_for_repair_ci_status(
+    repository,
+    received_commit_sha,
+    ):
+        ci_wait_calls.append(
+            (repository, received_commit_sha)
+        )
+
         assert repository == "example/project"
         assert received_commit_sha == commit_sha
+
+        if len(ci_wait_calls) == 1:
+            return RepairCIStatus(
+                repository=repository,
+                commit_sha=received_commit_sha,
+                state="failure",
+                check_runs=(
+                    RepairCheckRun(
+                        name="tests",
+                        status="completed",
+                        conclusion="failure",
+                        details_url=(
+                            "https://github.com/"
+                            "example/project/actions/runs/1"
+                        ),
+                    ),
+                ),
+            )
 
         return RepairCIStatus(
             repository=repository,
             commit_sha=received_commit_sha,
-            state="failure",
+            state=retry_state,
             check_runs=(
                 RepairCheckRun(
                     name="tests",
                     status="completed",
-                    conclusion="failure",
+                    conclusion=retry_state,
                     details_url=(
                         "https://github.com/"
-                        "example/project/actions/runs/1"
+                        "example/project/actions/runs/2"
                     ),
                 ),
             ),
@@ -3838,10 +3976,13 @@ def test_main_exits_with_error_when_repair_ci_fails(
         ],
     )
 
-    with pytest.raises(SystemExit) as error:
+    if expected_exit_code is None:
         cli.main()
+    else:
+        with pytest.raises(SystemExit) as error:
+            cli.main()
 
-    assert error.value.code == 1
+        assert error.value.code == expected_exit_code
 
     output = "\n".join(printed)
 
@@ -3857,3 +3998,29 @@ def test_main_exits_with_error_when_repair_ci_fails(
         in output
     )
     assert "Repair CI status error:" not in output
+
+    assert prompts == [
+        "Initial issue repair prompt",
+        "Remote CI failure repair prompt",
+    ]
+
+    assert summary_branches == [
+    "devpilot/issue-21-fix-repository-scan-limit",
+    "devpilot/issue-21-fix-repository-scan-limit",
+    ]
+
+    expected_retry_count = (
+    2 if retry_has_changes else 1
+    )
+
+    assert len(validation_calls) == expected_retry_count
+    assert len(commit_calls) == expected_retry_count
+    assert len(push_calls) == expected_retry_count
+    assert len(ci_wait_calls) == expected_retry_count
+
+    if retry_has_changes:
+        assert (
+            "https://github.com/"
+            "example/project/actions/runs/2"
+            in output
+        )
