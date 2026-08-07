@@ -304,8 +304,10 @@ Check runs:
 ```
 
 The transient states `no_checks` and `pending` cause DevPilot to keep waiting.
-The final states are `success` and `failure`. If no final state is reached
-before the timeout, the repair workflow exits with a CI status error.
+The final states are `success` and `failure`. A `failure` result is displayed
+with its check-run details, and the CLI exits with status code 1. If no final
+state is reached before the timeout, the repair workflow exits with a CI
+status error.
 
 ## Read it: the code map
 
