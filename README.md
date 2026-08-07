@@ -291,8 +291,9 @@ Commit: 0123456789abcdef0123456789abcdef01234567
 
 ### Repair pull request CI status
 
-After creating the Pull Request, DevPilot queries the latest GitHub check runs
-for the repair commit and displays their combined state.
+After creating the Pull Request, DevPilot polls the latest GitHub check runs
+for the repair commit until they reach a final state. By default, it checks
+every 5 seconds for up to 300 seconds.
 
 ```text
 Repair CI status
@@ -302,10 +303,9 @@ Check runs:
     URL: https://github.com/owner/repository/actions/runs/1
 ```
 
-A repair commit with no available check runs is reported as `no_checks`.
-Incomplete check runs are reported as `pending`, while completed unsuccessful
-check runs are reported as `failure`.
-
+The transient states `no_checks` and `pending` cause DevPilot to keep waiting.
+The final states are `success` and `failure`. If no final state is reached
+before the timeout, the repair workflow exits with a CI status error.
 
 ## Read it: the code map
 

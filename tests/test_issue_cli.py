@@ -1805,7 +1805,7 @@ def test_main_pushes_repair_branch_after_commit(
             commit_sha=commit_sha,
         )
 
-    def fake_fetch_repair_ci_status(
+    def fake_wait_for_repair_ci_status(
         repository,
         received_commit_sha,
     ):
@@ -1877,8 +1877,8 @@ def test_main_pushes_repair_branch_after_commit(
 
     monkeypatch.setattr(
     cli,
-    "fetch_repair_ci_status",
-    fake_fetch_repair_ci_status,
+    "wait_for_repair_ci_status",
+    fake_wait_for_repair_ci_status,
     raising=False,
     )
 
@@ -2218,7 +2218,7 @@ def test_main_reports_repair_ci_status_error(
         raising=False,
     )
 
-    def fake_fetch_repair_ci_status(
+    def fake_wait_for_repair_ci_status(
         repository,
         commit_sha,
     ):
@@ -2235,11 +2235,12 @@ def test_main_reports_repair_ci_status_error(
         )
 
     monkeypatch.setattr(
-        cli,
-        "fetch_repair_ci_status",
-        fake_fetch_repair_ci_status,
-        raising=False,
+    cli,
+    "wait_for_repair_ci_status",
+    fake_wait_for_repair_ci_status,
+    raising=False,
     )
+
     monkeypatch.setattr(
         cli.console,
         "print",
@@ -2592,6 +2593,17 @@ def _patch_runtime(
             check_runs=(),
         )
 
+    def fake_wait_for_repair_ci_status(
+            repository,
+            commit_sha,
+        ):
+            return RepairCIStatus(
+                repository=repository,
+                commit_sha=commit_sha,
+                state="no_checks",
+                check_runs=(),
+            )
+
     monkeypatch.setattr(
         cli,
         "check_worktree",
@@ -2667,10 +2679,18 @@ def _patch_runtime(
     raising=False,
     )
 
+
     monkeypatch.setattr(
     cli,
     "fetch_repair_ci_status",
     fake_fetch_repair_ci_status,
+    raising=False,
+    )
+
+    monkeypatch.setattr(
+    cli,
+    "wait_for_repair_ci_status",
+    fake_wait_for_repair_ci_status,
     raising=False,
     )
 
@@ -2690,6 +2710,8 @@ def _patch_runtime(
         "LLM",
         lambda **kwargs: object(),
     )
+
+
 
     def fake_agent(**kwargs):
         if captured is not None:

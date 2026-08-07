@@ -10,6 +10,7 @@ from .github_issue import (
     _github_token,
     _http_error_message,
 )
+from time import monotonic, sleep
 
 class RepairCIStatusError(RuntimeError):
     """Raised when repair CI status cannot be queried."""
@@ -243,3 +244,53 @@ def fetch_repair_ci_status(
         state=_combined_state(check_runs),
         check_runs=check_runs,
     )
+
+def wait_for_repair_ci_status(
+    repository: str,
+    commit_sha: str,
+    *,
+    timeout: int = 300,
+    poll_interval: int = 5,
+) -> RepairCIStatus:
+    """Poll GitHub until repair CI reaches a final state."""
+    if timeout <= 0:
+        raise RepairCIStatusError(
+            "CI polling timeout must be "
+            "greater than zero"
+        )
+
+    if poll_interval <= 0:
+        raise RepairCIStatusError(
+            "CI polling interval must be "
+            "greater than zero"
+        )
+    deadline = monotonic() + timeout
+
+    while True:
+        ci_status = fetch_repair_ci_status(
+            repository,
+            commit_sha,
+        )
+
+        if ci_status.state in {
+            "success",
+            "failure",
+        }:
+            return ci_status
+
+        current_time = monotonic()
+
+        if current_time >= deadline:
+            raise RepairCIStatusError(
+                "Timed out waiting for repair CI "
+                f"status after {timeout} seconds"
+            )
+
+        remaining_timeout = deadline - current_time
+
+        sleep(
+            min(
+                poll_interval,
+                remaining_timeout,
+            )
+        )

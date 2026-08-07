@@ -55,8 +55,8 @@ from .repair_pr import (
     create_repair_pull_request,
 )
 from .repair_ci import (
-    fetch_repair_ci_status,
     RepairCIStatusError,
+    wait_for_repair_ci_status,
 )
 
 from .session import save_session, load_session, list_sessions
@@ -557,7 +557,7 @@ def main():
                     f"[cyan]{repair_pull_request.commit_sha}[/cyan]"
                 )
                 try:
-                    repair_ci_status = fetch_repair_ci_status(
+                    repair_ci_status = wait_for_repair_ci_status(
                         repair_pull_request.repository,
                         repair_pull_request.commit_sha,
                     )

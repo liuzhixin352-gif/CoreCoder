@@ -609,3 +609,215 @@ def test_fetch_repair_ci_status_converts_os_error(
             "example/project",
             commit_sha,
         )
+
+def test_wait_for_repair_ci_status_polls_until_success(
+    monkeypatch,
+):
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+    statuses = iter(
+        [
+            repair_ci.RepairCIStatus(
+                repository="example/project",
+                commit_sha=commit_sha,
+                state="no_checks",
+                check_runs=(),
+            ),
+            repair_ci.RepairCIStatus(
+                repository="example/project",
+                commit_sha=commit_sha,
+                state="pending",
+                check_runs=(
+                    repair_ci.RepairCheckRun(
+                        name="tests",
+                        status="in_progress",
+                        conclusion=None,
+                        details_url=None,
+                    ),
+                ),
+            ),
+            repair_ci.RepairCIStatus(
+                repository="example/project",
+                commit_sha=commit_sha,
+                state="success",
+                check_runs=(
+                    repair_ci.RepairCheckRun(
+                        name="tests",
+                        status="completed",
+                        conclusion="success",
+                        details_url=None,
+                    ),
+                ),
+            ),
+        ]
+    )
+    fetch_calls = []
+    sleep_calls = []
+
+    def fake_fetch_repair_ci_status(
+        repository,
+        received_commit_sha,
+    ):
+        fetch_calls.append(
+            (
+                repository,
+                received_commit_sha,
+            )
+        )
+        return next(statuses)
+
+    monkeypatch.setattr(
+        repair_ci,
+        "fetch_repair_ci_status",
+        fake_fetch_repair_ci_status,
+    )
+    monkeypatch.setattr(
+        repair_ci,
+        "sleep",
+        lambda seconds: sleep_calls.append(seconds),
+        raising=False,
+    )
+
+    result = repair_ci.wait_for_repair_ci_status(
+        "example/project",
+        commit_sha,
+        timeout=60,
+        poll_interval=2,
+    )
+
+    assert result.state == "success"
+    assert fetch_calls == [
+        ("example/project", commit_sha),
+        ("example/project", commit_sha),
+        ("example/project", commit_sha),
+    ]
+    assert sleep_calls == [2, 2]
+
+
+@pytest.mark.parametrize(
+    (
+        "timeout",
+        "poll_interval",
+        "error_message",
+    ),
+    [
+        (
+            0,
+            2,
+            "CI polling timeout must be "
+            "greater than zero",
+        ),
+        (
+            60,
+            0,
+            "CI polling interval must be "
+            "greater than zero",
+        ),
+    ],
+)
+def test_wait_for_repair_ci_status_rejects_non_positive_values(
+    monkeypatch,
+    timeout,
+    poll_interval,
+    error_message,
+):
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+
+    monkeypatch.setattr(
+        repair_ci,
+        "fetch_repair_ci_status",
+        lambda *args, **kwargs: pytest.fail(
+            "CI fetch must not run with "
+            "invalid polling values"
+        ),
+    )
+
+    with pytest.raises(
+        repair_ci.RepairCIStatusError,
+        match=error_message,
+    ):
+        repair_ci.wait_for_repair_ci_status(
+            "example/project",
+            commit_sha,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+
+def test_wait_for_repair_ci_status_caps_sleep_to_remaining_timeout(
+    monkeypatch,
+):
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+    fetch_calls = []
+    sleep_calls = []
+    monotonic_values = iter(
+        [
+            0.0,
+            1.0,
+            5.0,
+        ]
+    )
+
+    def fake_fetch_repair_ci_status(
+        repository,
+        received_commit_sha,
+    ):
+        fetch_calls.append(
+            (
+                repository,
+                received_commit_sha,
+            )
+        )
+
+        return repair_ci.RepairCIStatus(
+            repository=repository,
+            commit_sha=received_commit_sha,
+            state="no_checks",
+            check_runs=(),
+        )
+
+    monkeypatch.setattr(
+        repair_ci,
+        "fetch_repair_ci_status",
+        fake_fetch_repair_ci_status,
+    )
+    monkeypatch.setattr(
+        repair_ci,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(
+        repair_ci,
+        "sleep",
+        lambda seconds: sleep_calls.append(seconds),
+    )
+
+    with pytest.raises(
+        repair_ci.RepairCIStatusError,
+        match=(
+            "Timed out waiting for repair CI "
+            "status after 5 seconds"
+        ),
+    ):
+        repair_ci.wait_for_repair_ci_status(
+            "example/project",
+            commit_sha,
+            timeout=5,
+            poll_interval=10,
+        )
+
+    assert fetch_calls == [
+        ("example/project", commit_sha),
+        ("example/project", commit_sha),
+    ]
+    assert sleep_calls == [4.0]
