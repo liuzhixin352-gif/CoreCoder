@@ -604,6 +604,9 @@ def main():
                     console.print(
                         "  [dim]No check runs found[/dim]"
                     )
+                if repair_ci_status.state == "failure":
+                    sys.exit(1)
+
             else:
                 console.print(
                     "[yellow]"

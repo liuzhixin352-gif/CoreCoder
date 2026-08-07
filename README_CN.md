@@ -291,7 +291,8 @@ Check runs:
 ```
 
 `no_checks` 和 `pending` 属于临时状态，DevPilot 会继续等待；最终状态为
-`success` 或 `failure`。如果在超时时间内仍未进入最终状态，修复流程会报告
+`success` 或 `failure`。当结果为 `failure` 时，CLI 会先显示失败的 check run
+详情，再以退出码 1 结束。如果在超时时间内仍未进入最终状态，修复流程会报告
 CI 状态错误并退出。
 
 ## 读懂它：代码地图

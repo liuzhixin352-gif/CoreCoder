@@ -3739,3 +3739,121 @@ def test_main_skips_repair_push_when_commit_fails(
         cli.main()
 
     assert error.value.code == 1
+
+
+def test_main_exits_with_error_when_repair_ci_fails(
+    monkeypatch,
+):
+    printed = []
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "CI failure prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_post_repair_summary",
+        lambda branch: PostRepairSummary(
+            branch=branch,
+            changes=(
+                " M corecoder/cli.py",
+            ),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
+    )
+
+    def fake_wait_for_repair_ci_status(
+        repository,
+        received_commit_sha,
+    ):
+        assert repository == "example/project"
+        assert received_commit_sha == commit_sha
+
+        return RepairCIStatus(
+            repository=repository,
+            commit_sha=received_commit_sha,
+            state="failure",
+            check_runs=(
+                RepairCheckRun(
+                    name="tests",
+                    status="completed",
+                    conclusion="failure",
+                    details_url=(
+                        "https://github.com/"
+                        "example/project/actions/runs/1"
+                    ),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "wait_for_repair_ci_status",
+        fake_wait_for_repair_ci_status,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 1
+
+    output = "\n".join(printed)
+
+    assert "Repair pull request created" in output
+    assert "Repair CI status" in output
+    assert "State:" in output
+    assert "failure" in output
+    assert "tests" in output
+    assert "completed" in output
+    assert (
+        "https://github.com/"
+        "example/project/actions/runs/1"
+        in output
+    )
+    assert "Repair CI status error:" not in output
