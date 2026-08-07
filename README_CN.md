@@ -279,8 +279,8 @@ Commit: 0123456789abcdef0123456789abcdef01234567
 
 ### 查询修复 Pull Request 的 CI 状态
 
-创建 Pull Request 后，DevPilot 会查询修复提交最新的 GitHub check runs，
-并显示它们的综合状态。
+创建 Pull Request 后，DevPilot 会持续轮询修复提交最新的 GitHub check runs，
+直到检查进入最终状态。默认每 5 秒查询一次，最多等待 300 秒。
 
 ```text
 Repair CI status
@@ -290,9 +290,9 @@ Check runs:
     URL: https://github.com/owner/repository/actions/runs/1
 ```
 
-没有可用 check run 时显示 `no_checks`；存在尚未完成的 check run 时显示
-`pending`；所有检查均已完成但存在未成功结果时显示 `failure`。
-
+`no_checks` 和 `pending` 属于临时状态，DevPilot 会继续等待；最终状态为
+`success` 或 `failure`。如果在超时时间内仍未进入最终状态，修复流程会报告
+CI 状态错误并退出。
 
 ## 读懂它：代码地图
 
