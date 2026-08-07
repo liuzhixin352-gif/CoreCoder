@@ -294,3 +294,46 @@ def wait_for_repair_ci_status(
                 remaining_timeout,
             )
         )
+
+def build_repair_ci_failure_prompt(
+    ci_status: RepairCIStatus,
+) -> str:
+    """Build an Agent prompt from failed remote CI checks."""
+    failed_checks = [
+        check_run
+        for check_run in ci_status.check_runs
+        if check_run.conclusion != "success"
+    ]
+
+    lines = [
+        "The remote CI failed for the repair commit.",
+        "",
+        f"Repository: {ci_status.repository}",
+        f"Commit: {ci_status.commit_sha}",
+        "",
+        "Failed checks:",
+    ]
+
+    for check_run in failed_checks:
+        lines.append(
+            f"- {check_run.name}: "
+            f"{check_run.status} / "
+            f"{check_run.conclusion}"
+        )
+
+        if check_run.details_url is not None:
+            lines.append(
+                f"  URL: {check_run.details_url}"
+            )
+
+    lines.extend(
+        [
+            "",
+            "Fix the repository so the failed remote CI "
+            "checks pass.",
+            "Preserve the existing intended repair and "
+            "avoid unrelated changes.",
+        ]
+    )
+
+    return "\n".join(lines)

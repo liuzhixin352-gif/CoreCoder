@@ -291,9 +291,15 @@ Check runs:
 ```
 
 `no_checks` 和 `pending` 属于临时状态，DevPilot 会继续等待；最终状态为
-`success` 或 `failure`。当结果为 `failure` 时，CLI 会先显示失败的 check run
-详情，再以退出码 1 结束。如果在超时时间内仍未进入最终状态，修复流程会报告
-CI 状态错误并退出。
+`success` 或 `failure`。如果第一次 CI 结果为 `failure`，DevPilot 会根据失败
+的 check run 详情自动执行一次 CI 驱动的二次修复，然后重新进行本地验证、
+创建新的修复提交，并推送到同一个修复分支，使原 Pull Request 更新到新的
+提交，随后再次等待远程 CI。
+
+如果第二次 CI 成功，修复流程正常结束；如果第二次 CI 仍然失败，DevPilot
+会显示第二次失败的 check run 详情，并以退出码 1 结束。如果二次修复没有
+产生任何仓库修改，流程同样会以退出码 1 结束。如果在超时时间内仍未进入
+最终 CI 状态，修复流程会报告 CI 状态错误并退出。
 
 ## 读懂它：代码地图
 
