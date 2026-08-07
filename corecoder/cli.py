@@ -54,6 +54,10 @@ from .repair_pr import (
     RepairPullRequestError,
     create_repair_pull_request,
 )
+from .repair_ci import (
+    fetch_repair_ci_status,
+    RepairCIStatusError,
+)
 
 from .session import save_session, load_session, list_sessions
 from . import __version__
@@ -552,6 +556,54 @@ def main():
                     "[bold]Commit:[/] "
                     f"[cyan]{repair_pull_request.commit_sha}[/cyan]"
                 )
+                try:
+                    repair_ci_status = fetch_repair_ci_status(
+                        repair_pull_request.repository,
+                        repair_pull_request.commit_sha,
+                    )
+                except RepairCIStatusError as error:
+                    console.print(
+                        "[red bold]Repair CI status error:[/] "
+                        f"{error}"
+                    )
+                    sys.exit(1)
+
+                console.print()
+                console.print(
+                    "[green bold]Repair CI status[/]"
+                )
+                console.print(
+                    "[bold]State:[/] "
+                    f"[cyan]{repair_ci_status.state}[/cyan]"
+                )
+                console.print(
+                    "[bold]Check runs:[/]"
+                )
+
+                if repair_ci_status.check_runs:
+                    for check_run in repair_ci_status.check_runs:
+                        conclusion = (
+                            check_run.conclusion
+                            if check_run.conclusion is not None
+                            else "-"
+                        )
+                        console.print(
+                            "  "
+                            f"[cyan]{check_run.name}[/cyan]: "
+                            f"{check_run.status} / "
+                            f"{conclusion}"
+                        )
+
+                        if check_run.details_url is not None:
+                            console.print(
+                                "    "
+                                "[bold]URL:[/] "
+                                f"[cyan]{check_run.details_url}[/cyan]"
+                            )
+                else:
+                    console.print(
+                        "  [dim]No check runs found[/dim]"
+                    )
             else:
                 console.print(
                     "[yellow]"
