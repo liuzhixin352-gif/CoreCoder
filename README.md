@@ -309,10 +309,10 @@ Check runs:
 
 The transient states `no_checks` and `pending` cause DevPilot to keep waiting.
 The final states are `success` and `failure`. If the first CI result is
-`failure`, DevPilot performs one automatic CI-driven repair attempt using the
-failed check-run details, validates the new changes locally, creates another
-repair commit, pushes it to the same repair branch, and waits for CI again on
-the updated Pull Request.
+`failure`, DevPilot downloads the failed GitHub Actions job logs and uses them
+to guide one automatic repair retry: it validates the new changes locally,
+creates another repair commit, pushes it to the same repair branch, and waits
+for CI again on the updated Pull Request.
 
 If the retry succeeds, the repair workflow finishes normally. If the retry
 fails, DevPilot displays the retry check-run details and exits with status
