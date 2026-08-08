@@ -967,3 +967,59 @@ def test_build_repair_ci_failure_prompt_includes_check_logs():
         in prompt
     )
     assert "AssertionError: expected 1, got 2" in prompt
+
+
+def test_fetch_repair_check_log_does_not_forward_auth_to_redirect(
+    monkeypatch,
+):
+    check_run = repair_ci.RepairCheckRun(
+        name="lint",
+        status="completed",
+        conclusion="failure",
+        details_url=(
+            "https://github.com/"
+            "example/project/actions/runs/1/job/123456789"
+        ),
+    )
+    captured = {}
+
+    monkeypatch.setenv(
+        "GITHUB_TOKEN",
+        "test-token",
+    )
+    monkeypatch.delenv(
+        "GH_TOKEN",
+        raising=False,
+    )
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+
+        return _RawResponse(
+            b"F401 `os` imported but unused\n"
+        )
+
+    monkeypatch.setattr(
+        repair_ci,
+        "urlopen",
+        fake_urlopen,
+    )
+
+    result = repair_ci.fetch_repair_check_log(
+        "example/project",
+        check_run,
+    )
+
+    request = captured["request"]
+
+    assert request.get_header(
+        "Authorization"
+    ) == "Bearer test-token"
+
+    assert "Authorization" not in request.headers
+
+    assert request.unredirected_hdrs[
+        "Authorization"
+    ] == "Bearer test-token"
+
+    assert result == "F401 `os` imported but unused\n"
