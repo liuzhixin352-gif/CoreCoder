@@ -191,15 +191,27 @@ def fetch_repair_check_log(
 
     job_id = path_parts[6]
 
+    headers = _github_request_headers()
+    authorization = headers.pop(
+        "Authorization",
+        None,
+    )
+
     request = Request(
         (
             "https://api.github.com/repos/"
             f"{repository}/actions/jobs/"
             f"{job_id}/logs"
         ),
-        headers=_github_request_headers(),
+        headers=headers,
         method="GET",
     )
+
+    if authorization is not None:
+        request.add_unredirected_header(
+            "Authorization",
+            authorization,
+        )
 
     try:
         with urlopen(
