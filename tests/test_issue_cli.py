@@ -2609,6 +2609,13 @@ def _patch_runtime(
         "check_worktree",
         lambda: _worktree_preflight(),
     )
+
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
+    )
     monkeypatch.setattr(
         cli,
         "create_repair_branch",

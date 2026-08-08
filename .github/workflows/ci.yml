@@ -58,7 +58,7 @@ jobs:
           cache: pip
 
       - name: Install ruff
-        run: python -m pip install -U pip ruff
+        run: python -m pip install -U pip "ruff==0.15.22"
 
       - name: Ruff check
         run: ruff check corecoder tests
