@@ -294,9 +294,10 @@ Commit: 0123456789abcdef0123456789abcdef01234567
 
 ### Repair pull request CI status
 
-After creating the Pull Request, DevPilot polls the latest GitHub check runs
-for the repair commit until they reach a final state. By default, it checks
-every 5 seconds for up to 300 seconds.
+After creating the Pull Request, DevPilot waits for GitHub Actions CI to
+finish. It polls the latest GitHub check runs for the repair commit until
+they reach a final state. By default, it checks every 5 seconds for up to
+300 seconds.
 
 ```text
 Repair CI status
