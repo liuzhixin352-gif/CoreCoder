@@ -593,6 +593,13 @@ def test_main_reports_repair_branch_error_before_runtime(
         lambda: _worktree_preflight(),
     )
 
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
+    )
+
     def fake_create_repair_branch(received_task):
         raise RepairBranchError(
             "unable to create repair branch"
@@ -2608,6 +2615,13 @@ def _patch_runtime(
         cli,
         "check_worktree",
         lambda: _worktree_preflight(),
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
     )
     monkeypatch.setattr(
         cli,
