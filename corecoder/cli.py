@@ -58,6 +58,7 @@ from .repair_ci import (
     RepairCIStatusError,
     wait_for_repair_ci_status,
     build_repair_ci_failure_prompt,
+    fetch_repair_check_log,
 )
 
 from .session import save_session, load_session, list_sessions
@@ -606,9 +607,31 @@ def main():
                         "  [dim]No check runs found[/dim]"
                     )
                 if repair_ci_status.state == "failure":
+                    check_logs = {}
+
+                    for check_run in repair_ci_status.check_runs:
+                        if check_run.conclusion == "success":
+                            continue
+
+                        try:
+                            check_logs[check_run.name] = (
+                                fetch_repair_check_log(
+                                    repair_ci_status.repository,
+                                    check_run,
+                                )
+                            )
+                        except RepairCIStatusError as error:
+                            console.print(
+                                "[yellow bold]"
+                                "Repair CI log warning:"
+                                "[/] "
+                                f"{error}"
+                            )
+
                     ci_failure_prompt = (
                         build_repair_ci_failure_prompt(
-                            repair_ci_status
+                            repair_ci_status,
+                            check_logs=check_logs,
                         )
                     )
                     _run_once(agent, ci_failure_prompt)

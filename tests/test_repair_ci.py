@@ -867,3 +867,103 @@ def test_build_repair_ci_failure_prompt_includes_failed_checks():
     )
     assert "lint" not in prompt
     assert "Fix the repository" in prompt
+
+def test_fetch_repair_check_log_downloads_github_actions_job_log(
+    monkeypatch,
+):
+    check_run = repair_ci.RepairCheckRun(
+        name="tests",
+        status="completed",
+        conclusion="failure",
+        details_url=(
+            "https://github.com/"
+            "example/project/actions/runs/1/job/123456789"
+        ),
+    )
+    captured = {}
+
+    monkeypatch.setenv(
+        "GITHUB_TOKEN",
+        "test-token",
+    )
+    monkeypatch.delenv(
+        "GH_TOKEN",
+        raising=False,
+    )
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+
+        return _RawResponse(
+            b"Run pytest\n"
+            b"FAILED tests/test_example.py::test_failure\n"
+        )
+
+    monkeypatch.setattr(
+        repair_ci,
+        "urlopen",
+        fake_urlopen,
+    )
+
+    result = repair_ci.fetch_repair_check_log(
+        "example/project",
+        check_run,
+    )
+
+    request = captured["request"]
+
+    assert request.full_url == (
+        "https://api.github.com/repos/"
+        "example/project/actions/jobs/"
+        "123456789/logs"
+    )
+    assert request.get_method() == "GET"
+    assert captured["timeout"] == 20
+    assert request.get_header(
+        "Authorization"
+    ) == "Bearer test-token"
+    assert result == (
+        "Run pytest\n"
+        "FAILED tests/test_example.py::test_failure\n"
+    )
+
+def test_build_repair_ci_failure_prompt_includes_check_logs():
+    commit_sha = (
+        "0123456789abcdef"
+        "0123456789abcdef"
+        "01234567"
+    )
+    ci_status = repair_ci.RepairCIStatus(
+        repository="example/project",
+        commit_sha=commit_sha,
+        state="failure",
+        check_runs=(
+            repair_ci.RepairCheckRun(
+                name="tests",
+                status="completed",
+                conclusion="failure",
+                details_url=(
+                    "https://github.com/"
+                    "example/project/actions/runs/1/job/123"
+                ),
+            ),
+        ),
+    )
+
+    prompt = repair_ci.build_repair_ci_failure_prompt(
+        ci_status,
+        check_logs={
+            "tests": (
+                "FAILED tests/test_example.py::test_failure\n"
+                "AssertionError: expected 1, got 2"
+            ),
+        },
+    )
+
+    assert "CI log for tests:" in prompt
+    assert (
+        "FAILED tests/test_example.py::test_failure"
+        in prompt
+    )
+    assert "AssertionError: expected 1, got 2" in prompt

@@ -3780,6 +3780,7 @@ def test_main_handles_repair_ci_retry_result(
     commit_calls = []
     push_calls = []
     ci_wait_calls = []
+    ci_log_calls = []
 
     commit_sha = (
         "0123456789abcdef"
@@ -3806,16 +3807,48 @@ def test_main_handles_repair_ci_retry_result(
         lambda *args, **kwargs: "Initial issue repair prompt",
     )
 
-    def fake_build_repair_ci_failure_prompt(ci_status):
+    def fake_build_repair_ci_failure_prompt(
+    ci_status,
+    *,
+    check_logs=None,
+    ):
         assert ci_status.state == "failure"
         assert ci_status.repository == "example/project"
         assert ci_status.commit_sha == commit_sha
+        assert check_logs == {
+            "tests": (
+                "FAILED tests/test_example.py::test_failure\n"
+                "AssertionError: expected 1, got 2"
+            ),
+        }
         return "Remote CI failure repair prompt"
 
     monkeypatch.setattr(
         cli,
         "build_repair_ci_failure_prompt",
         fake_build_repair_ci_failure_prompt,
+        raising=False,
+    )
+
+    def fake_fetch_repair_check_log(
+    repository,
+    check_run,
+    ):
+        ci_log_calls.append(
+            (repository, check_run.name)
+        )
+        assert repository == "example/project"
+        assert check_run.conclusion == "failure"
+
+        return (
+            "FAILED tests/test_example.py::test_failure\n"
+            "AssertionError: expected 1, got 2"
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_repair_check_log",
+        fake_fetch_repair_check_log,
         raising=False,
     )
     monkeypatch.setattr(
@@ -4038,3 +4071,6 @@ def test_main_handles_repair_ci_retry_result(
             "example/project/actions/runs/2"
             in output
         )
+    assert ci_log_calls == [
+    ("example/project", "tests"),
+    ]
