@@ -10,6 +10,7 @@ from .github_issue import (
     _github_token,
     _http_error_message,
 )
+from urllib.parse import urlparse
 from time import monotonic, sleep
 
 class RepairCIStatusError(RuntimeError):
@@ -142,6 +143,105 @@ def _combined_state(
 
     return "failure"
 
+
+def fetch_repair_check_log(
+    repository: str,
+    check_run: RepairCheckRun,
+    *,
+    timeout: int = 20,
+) -> str:
+    """Download the GitHub Actions job log for a check run."""
+    if _github_token() is None:
+        raise RepairCIStatusError(
+            "GitHub token is required to query "
+            "repair CI logs"
+        )
+
+    details_url = check_run.details_url
+
+    if details_url is None:
+        raise RepairCIStatusError(
+            "Repair check run has no details URL"
+        )
+
+    parsed_url = urlparse(details_url)
+    repository_parts = repository.split("/")
+    path_parts = [
+        part
+        for part in parsed_url.path.split("/")
+        if part
+    ]
+
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.netloc != "github.com"
+        or len(repository_parts) != 2
+        or len(path_parts) != 7
+        or path_parts[0:2] != repository_parts
+        or path_parts[2] != "actions"
+        or path_parts[3] != "runs"
+        or not path_parts[4].isdigit()
+        or path_parts[5] != "job"
+        or not path_parts[6].isdigit()
+    ):
+        raise RepairCIStatusError(
+            "Repair check run details URL is not "
+            "a supported GitHub Actions job URL"
+        )
+
+    job_id = path_parts[6]
+
+    request = Request(
+        (
+            "https://api.github.com/repos/"
+            f"{repository}/actions/jobs/"
+            f"{job_id}/logs"
+        ),
+        headers=_github_request_headers(),
+        method="GET",
+    )
+
+    try:
+        with urlopen(
+            request,
+            timeout=timeout,
+        ) as response:
+            raw_response = response.read()
+    except HTTPError as error:
+        raise RepairCIStatusError(
+            _http_error_message(error)
+        ) from error
+    except (TimeoutError, socket.timeout) as error:
+        raise RepairCIStatusError(
+            f"GitHub API request timed out after "
+            f"{timeout} seconds"
+        ) from error
+    except URLError as error:
+        reason = error.reason
+
+        if isinstance(
+            reason,
+            (TimeoutError, socket.timeout),
+        ):
+            raise RepairCIStatusError(
+                f"GitHub API request timed out after "
+                f"{timeout} seconds"
+            ) from error
+
+        raise RepairCIStatusError(
+            f"GitHub API network error: {reason}"
+        ) from error
+    except OSError as error:
+        raise RepairCIStatusError(
+            f"GitHub API network error: {error}"
+        ) from error
+
+    try:
+        return raw_response.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RepairCIStatusError(
+            "GitHub Actions job log is not valid UTF-8"
+        ) from error
 
 def fetch_repair_ci_status(
     repository: str,
@@ -297,6 +397,8 @@ def wait_for_repair_ci_status(
 
 def build_repair_ci_failure_prompt(
     ci_status: RepairCIStatus,
+    *,
+    check_logs: dict[str, str] | None = None,
 ) -> str:
     """Build an Agent prompt from failed remote CI checks."""
     failed_checks = [
@@ -324,6 +426,17 @@ def build_repair_ci_failure_prompt(
         if check_run.details_url is not None:
             lines.append(
                 f"  URL: {check_run.details_url}"
+            )
+        if (
+            check_logs is not None
+            and check_run.name in check_logs
+        ):
+            lines.extend(
+                [
+                    "",
+                    f"CI log for {check_run.name}:",
+                    check_logs[check_run.name],
+                ]
             )
 
     lines.extend(
