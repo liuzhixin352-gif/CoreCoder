@@ -83,6 +83,9 @@ corecoder -p "add error handling to parse_config()"   # one-shot mode, exits whe
 DevPilot can fetch a real GitHub Issue, verify the current repository,
 inspect the codebase, and run a structured repair workflow.
 
+DevPilot development uses GitHub Actions CI: every pull request targeting
+`devpilot-v1` automatically runs the project's CI workflow.
+
 Start with a read-only dry run:
 
 ```bash
