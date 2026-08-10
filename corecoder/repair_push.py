@@ -93,20 +93,44 @@ def push_repair_branch(
             "to the validated repair commit"
         )
 
-    _run_git(
-        [
-            "git",
-            "push",
-            "--set-upstream",
-            remote,
-            branch,
-        ],
-        cwd=cwd,
-        timeout=timeout,
-        error_message=(
-            f"unable to push repair branch {branch}"
-        ),
+    push_command = [
+    "git",
+    "push",
+    "--set-upstream",
+    remote,
+    branch,
+    ]
+    push_error_message = (
+        f"unable to push repair branch {branch}"
     )
+
+    try:
+        _run_git(
+            push_command,
+            cwd=cwd,
+            timeout=timeout,
+            error_message=push_error_message,
+        )
+    except RepairPushError as error:
+        error_text = str(error).lower()
+        transient_network_errors = (
+            "connection was reset",
+            "failed to connect to",
+            "could not connect to server",
+        )
+
+        if not any(
+            marker in error_text
+            for marker in transient_network_errors
+        ):
+            raise
+
+        _run_git(
+            push_command,
+            cwd=cwd,
+            timeout=timeout,
+            error_message=push_error_message,
+        )
 
     return RepairPush(
         remote=remote,

@@ -221,6 +221,58 @@ def test_push_repair_branch_reports_push_failure(
 
     assert len(calls) == 2
 
+def test_push_repair_branch_retries_connection_reset(
+    monkeypatch,
+):
+    calls = []
+    push_attempts = []
+    commit_sha = "a" * 40
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+
+        if command[:2] == [
+            "git",
+            "rev-parse",
+        ]:
+            return _completed_process(
+                command,
+                stdout=f"{commit_sha}\n",
+            )
+
+        push_attempts.append(command)
+
+        if len(push_attempts) == 1:
+            return _completed_process(
+                command,
+                returncode=1,
+                stderr=(
+                    "fatal: unable to access remote: "
+                    "Recv failure: Connection was reset"
+                ),
+            )
+
+        return _completed_process(command)
+
+    monkeypatch.setattr(
+        repair_push.subprocess,
+        "run",
+        fake_run,
+    )
+
+    result = push_repair_branch(
+        "devpilot/issue-29-ci-retry",
+        commit_sha,
+    )
+
+    assert result == RepairPush(
+        remote="origin",
+        branch="devpilot/issue-29-ci-retry",
+        commit_sha=commit_sha,
+    )
+    assert len(calls) == 3
+    assert len(push_attempts) == 2
+
 
 @pytest.mark.parametrize(
     "execution_error",
@@ -261,3 +313,104 @@ def test_push_repair_branch_reports_execution_error(
             "devpilot/issue-21-fix-scan-limit",
             "a" * 40,
         )
+
+def test_push_repair_branch_retries_connection_failure(
+    monkeypatch,
+):
+    calls = []
+    push_attempts = []
+    commit_sha = "a" * 40
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+
+        if command[:2] == [
+            "git",
+            "rev-parse",
+        ]:
+            return _completed_process(
+                command,
+                stdout=f"{commit_sha}\n",
+            )
+
+        push_attempts.append(command)
+
+        if len(push_attempts) == 1:
+            return _completed_process(
+                command,
+                returncode=1,
+                stderr=(
+                    "fatal: unable to access remote: "
+                    "Failed to connect to github.com "
+                    "port 443: Could not connect to server"
+                ),
+            )
+
+        return _completed_process(command)
+
+    monkeypatch.setattr(
+        repair_push.subprocess,
+        "run",
+        fake_run,
+    )
+
+    result = push_repair_branch(
+        "devpilot/issue-29-ci-retry",
+        commit_sha,
+    )
+
+    assert result == RepairPush(
+        remote="origin",
+        branch="devpilot/issue-29-ci-retry",
+        commit_sha=commit_sha,
+    )
+    assert len(calls) == 3
+    assert len(push_attempts) == 2
+
+def test_push_repair_branch_stops_after_one_retry(
+    monkeypatch,
+):
+    calls = []
+    push_attempts = []
+    commit_sha = "a" * 40
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+
+        if command[:2] == [
+            "git",
+            "rev-parse",
+        ]:
+            return _completed_process(
+                command,
+                stdout=f"{commit_sha}\n",
+            )
+
+        push_attempts.append(command)
+
+        return _completed_process(
+            command,
+            returncode=1,
+            stderr=(
+                "fatal: unable to access remote: "
+                "Recv failure: Connection was reset"
+            ),
+        )
+
+    monkeypatch.setattr(
+        repair_push.subprocess,
+        "run",
+        fake_run,
+    )
+
+    with pytest.raises(
+        RepairPushError,
+        match="unable to push repair branch",
+    ):
+        push_repair_branch(
+            "devpilot/issue-29-ci-retry",
+            commit_sha,
+        )
+
+    assert len(calls) == 3
+    assert len(push_attempts) == 2
