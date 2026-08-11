@@ -4074,3 +4074,262 @@ def test_main_handles_repair_ci_retry_result(
     assert ci_log_calls == [
     ("example/project", "tests"),
     ]
+def test_main_warns_when_repair_ci_log_fetch_fails(
+    monkeypatch,
+):
+    printed = []
+    captured = {}
+
+    _patch_runtime(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "issue repair prompt",
+    )
+
+    def fake_fetch_repair_check_log(
+        repository,
+        check_run,
+    ):
+        raise RepairCIStatusError(
+            "unable to fetch CI log"
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_repair_check_log",
+        fake_fetch_repair_check_log,
+        raising=False,
+    )
+
+    def fake_build_repair_ci_failure_prompt(
+        ci_status,
+        *,
+        check_logs=None,
+    ):
+        captured["check_logs"] = check_logs
+        return "CI failure repair prompt"
+
+    monkeypatch.setattr(
+        cli,
+        "build_repair_ci_failure_prompt",
+        fake_build_repair_ci_failure_prompt,
+        raising=False,
+    )
+
+    def fake_run_issue_workflow(**kwargs):
+        ci_status = RepairCIStatus(
+            repository="example/project",
+            commit_sha="0123456789abcdef",
+            state="failure",
+            check_runs=(
+                RepairCheckRun(
+                    name="tests",
+                    status="completed",
+                    conclusion="failure",
+                    details_url=None,
+                ),
+            ),
+        )
+
+        prompt = kwargs[
+            "build_ci_failure_prompt"
+        ](
+            ci_status
+        )
+
+        assert prompt == "CI failure repair prompt"
+
+        class Result:
+            summary = PostRepairSummary(
+                branch=(
+                    "devpilot/"
+                    "issue-21-fix-repository-scan-limit"
+                ),
+                changes=(),
+            )
+            validation = None
+            commit = None
+
+        return Result()
+
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        fake_run_issue_workflow,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli.console,
+        "print",
+        lambda *args, **kwargs: printed.append(
+            " ".join(str(value) for value in args)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()
+
+    assert captured["check_logs"] == {}
+
+    output = "\n".join(printed)
+    assert "Repair CI log warning:" in output
+    assert "unable to fetch CI log" in output
+
+def test_main_delegates_issue_dry_run_to_orchestrator(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "dry-run prompt",
+    )
+
+    def fake_run_issue_workflow(**kwargs):
+        captured["workflow_kwargs"] = kwargs
+        return None
+
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        fake_run_issue_workflow,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda *args, **kwargs: pytest.fail(
+            "CLI must delegate dry-run execution "
+            "to run_issue_workflow"
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--dry-run",
+        ],
+    )
+
+    cli.main()
+
+    workflow_kwargs = captured["workflow_kwargs"]
+
+    assert workflow_kwargs["issue_prompt"] == (
+        "dry-run prompt"
+    )
+    assert workflow_kwargs["dry_run"] is True
+    assert callable(workflow_kwargs["run_agent"])
+
+
+def test_main_delegates_issue_repair_to_orchestrator(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "create_repair_branch",
+        lambda received_task: (
+            "devpilot/issue-21-fix-repository-scan-limit"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "repair prompt",
+    )
+
+    def fake_run_issue_workflow(**kwargs):
+        captured["workflow_kwargs"] = kwargs
+        return None
+
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        fake_run_issue_workflow,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda *args, **kwargs: pytest.fail(
+            "CLI must delegate repair execution "
+            "to run_issue_workflow"
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+        ],
+    )
+
+    cli.main()

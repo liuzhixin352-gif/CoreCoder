@@ -63,7 +63,7 @@ from .repair_ci import (
 
 from .session import save_session, load_session, list_sessions
 from . import __version__
-
+from .issue_orchestration import run_issue_workflow
 console = Console()
 _DRY_RUN_TOOL_NAMES = frozenset(
     {
@@ -365,17 +365,192 @@ def main():
             )
         )
 
-        _run_once(agent, issue_prompt)
-
-        if not args.dry_run:
+        if args.dry_run:
+            run_issue_workflow(
+                issue_prompt=issue_prompt,
+                dry_run=True,
+                run_agent=lambda prompt: _run_once(
+                    agent,
+                    prompt,
+                ),
+            )
+        else:
             assert repair_branch is not None
             assert repair_base_branch is not None
+            assert issue_task.issue_number is not None
+
+            def create_pull_request_with_push_output(
+                repair_push,
+            ):
+                console.print()
+                console.print(
+                    "[green bold]Repair branch pushed[/]"
+                )
+                console.print(
+                    "[bold]Remote:[/] "
+                    f"[cyan]{repair_push.remote}[/cyan]"
+                )
+                console.print(
+                    "[bold]Branch:[/] "
+                    f"[cyan]{repair_push.branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_push.commit_sha}[/cyan]"
+                )
+
+                repair_pull_request = create_repair_pull_request(
+                    repository_preflight.target.full_name,
+                    issue_task.issue_number,
+                    issue_task.title,
+                    repair_push,
+                    repair_base_branch,
+                )
+
+                console.print()
+                console.print(
+                    "[green bold]Repair pull request created[/]"
+                )
+                console.print(
+                    "[bold]Pull request:[/] "
+                    f"[cyan]#{repair_pull_request.number}[/cyan]"
+                )
+                console.print(
+                    "[bold]URL:[/] "
+                    f"[cyan]{repair_pull_request.url}[/cyan]"
+                )
+                console.print(
+                    "[bold]Base:[/] "
+                    f"[cyan]{repair_pull_request.base_branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Head:[/] "
+                    f"[cyan]{repair_pull_request.head_branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_pull_request.commit_sha}[/cyan]"
+                )
+
+                return repair_pull_request
+
+            def build_ci_failure_prompt_with_logs(
+                ci_status,
+            ):
+                check_logs = {}
+
+                for check_run in ci_status.check_runs:
+                    if check_run.conclusion == "success":
+                        continue
+
+                    try:
+                        check_logs[check_run.name] = fetch_repair_check_log(
+                            ci_status.repository,
+                            check_run,
+                        )
+                    except RepairCIStatusError as error:
+                        console.print(
+                            "[yellow bold]"
+                            "Repair CI log warning:"
+                            "[/] "
+                            f"{error}"
+                        )
+
+                return build_repair_ci_failure_prompt(
+                    ci_status,
+                    check_logs=check_logs,
+                )
+            def print_repair_ci_status(
+                ci_status,
+                *,
+                title,
+            ):
+                console.print()
+                console.print(
+                    f"[green bold]{title}[/]"
+                )
+                console.print(
+                    "[bold]State:[/] "
+                    f"[cyan]{ci_status.state}[/cyan]"
+                )
+                console.print(
+                    "[bold]Check runs:[/]"
+                )
+
+                if ci_status.check_runs:
+                    for check_run in ci_status.check_runs:
+                        conclusion = (
+                            check_run.conclusion
+                            if check_run.conclusion is not None
+                            else "-"
+                        )
+
+                        console.print(
+                            "  "
+                            f"[cyan]{check_run.name}[/cyan]: "
+                            f"{check_run.status} / "
+                            f"{conclusion}"
+                        )
+
+                        if check_run.details_url is not None:
+                            console.print(
+                                "    "
+                                "[bold]URL:[/] "
+                                f"[cyan]{check_run.details_url}[/cyan]"
+                            )
+                else:
+                    console.print(
+                        "  [dim]No check runs found[/dim]"
+                    )
+            def wait_for_ci_with_output(
+                pull_request,
+            ):
+                ci_status = wait_for_repair_ci_status(
+                    pull_request.repository,
+                    pull_request.commit_sha,
+                )
+
+                print_repair_ci_status(
+                    ci_status,
+                    title="Repair CI status",
+                )
+
+                return ci_status
+            def wait_for_retry_ci_with_output(
+                repair_push,
+            ):
+                ci_status = wait_for_repair_ci_status(
+                    repository_preflight.target.full_name,
+                    repair_push.commit_sha,
+                )
+
+                print_repair_ci_status(
+                    ci_status,
+                    title="Repair CI retry status",
+                )
+
+                return ci_status
 
             try:
-                post_repair_summary = (
-                    collect_post_repair_summary(
-                        repair_branch
-                    )
+                workflow_result = run_issue_workflow(
+                    issue_prompt=issue_prompt,
+                    dry_run=False,
+                    run_agent=lambda prompt: _run_once(
+                        agent,
+                        prompt,
+                    ),
+                    repair_branch=repair_branch,
+                    collect_summary=collect_post_repair_summary,
+                    run_validation=run_post_repair_validation,
+                    create_commit=lambda: create_repair_commit(
+                        issue_task.issue_number,
+                        issue_task.title,
+                    ),
+                    push_commit=push_repair_branch,
+                    create_pull_request=create_pull_request_with_push_output,
+                    wait_for_ci=wait_for_ci_with_output,
+                    build_ci_failure_prompt=build_ci_failure_prompt_with_logs,
+                    wait_for_retry_ci=wait_for_retry_ci_with_output,
                 )
             except PostRepairSummaryError as error:
                 console.print(
@@ -383,36 +558,84 @@ def main():
                     f"{error}"
                 )
                 sys.exit(1)
-
-            console.print()
-            console.print(
-                "[bold]Post-repair summary[/bold]"
-            )
-            console.print(
-                "[bold]Repair branch:[/] "
-                f"[cyan]{post_repair_summary.branch}[/cyan]"
-            )
-
-            if post_repair_summary.has_changes:
-                console.print("[bold]Changed files:[/]")
-
-                for change in post_repair_summary.changes:
-                    console.print(
-                        f"  [yellow]{change}[/yellow]"
-                    )
-
-                try:
-                    post_repair_validation = (
-                        run_post_repair_validation()
-                    )
-                except PostRepairValidationError as error:
+            except PostRepairValidationError as error:
+                console.print(
+                    "[red bold]"
+                    "Post-repair validation error:"
+                    "[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairCommitError as error:
+                console.print(
+                    "[red bold]Repair commit error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairPushError as error:
+                console.print(
+                    "[red bold]Repair push error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairPullRequestError as error:
+                console.print(
+                    "[red bold]Repair pull request error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairCIStatusError as error:
+                console.print(
+                    "[red bold]Repair CI status error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except ValueError as error:
+                if str(error) == "CI repair produced no repository changes":
                     console.print(
                         "[red bold]"
-                        "Post-repair validation error:"
-                        "[/] "
-                        f"{error}"
+                        "CI repair produced no repository changes."
+                        "[/]"
                     )
                     sys.exit(1)
+
+                if str(error) == "CI retry failed":
+                    sys.exit(1)
+
+                raise
+            if workflow_result is not None:
+                post_repair_summary = workflow_result.summary
+
+                console.print()
+                console.print(
+                    "[bold]Post-repair summary[/bold]"
+                )
+                console.print(
+                    "[bold]Repair branch:[/] "
+                    f"[cyan]{post_repair_summary.branch}[/cyan]"
+                )
+
+                if post_repair_summary.has_changes:
+                    console.print(
+                        "[bold]Changed files:[/]"
+                    )
+
+                    for change in post_repair_summary.changes:
+                        console.print(
+                            f"  [yellow]{change}[/yellow]"
+                        )
+                else:
+                    console.print(
+                        "[yellow]"
+                        "No repository changes were produced."
+                        "[/yellow]"
+                    )
+
+            if (
+                workflow_result is not None
+                and workflow_result.validation is not None
+            ):
+                post_repair_validation = workflow_result.validation
 
                 validation_command = " ".join(
                     post_repair_validation.command
@@ -457,24 +680,11 @@ def main():
                 if not post_repair_validation.passed:
                     sys.exit(1)
 
-                if issue_task.issue_number is None:
-                    console.print(
-                        "[red bold]Repair commit error:[/] "
-                        "GitHub Issue number is unavailable."
-                    )
-                    sys.exit(1)
-
-                try:
-                    repair_commit = create_repair_commit(
-                        issue_task.issue_number,
-                        issue_task.title,
-                    )
-                except RepairCommitError as error:
-                    console.print(
-                        "[red bold]Repair commit error:[/] "
-                        f"{error}"
-                    )
-                    sys.exit(1)
+            if (
+                workflow_result is not None
+                and workflow_result.commit is not None
+            ):
+                repair_commit = workflow_result.commit
 
                 console.print()
                 console.print(
@@ -484,289 +694,17 @@ def main():
                     "[bold]Commit:[/] "
                     f"[cyan]{repair_commit.sha}[/cyan]"
                 )
-
                 console.print(
                     "[bold]Message:[/] "
                     f"{repair_commit.message}"
                 )
-                try:
-                    repair_push = push_repair_branch(
-                        repair_branch,
-                        repair_commit.sha,
-                    )
-                except RepairPushError as error:
-                    console.print(
-                        "[red bold]Repair push error:[/] "
-                        f"{error}"
-                    )
-                    sys.exit(1)
 
-                console.print()
-                console.print(
-                    "[green bold]Repair branch pushed[/]"
-                )
-                console.print(
-                    "[bold]Remote:[/] "
-                    f"[cyan]{repair_push.remote}[/cyan]"
-                )
-                console.print(
-                    "[bold]Branch:[/] "
-                    f"[cyan]{repair_push.branch}[/cyan]"
-                )
-                console.print(
-                    "[bold]Commit:[/] "
-                    f"[cyan]{repair_push.commit_sha}[/cyan]"
-                )
-                try:
-                    repair_pull_request = (
-                        create_repair_pull_request(
-                            repository_preflight.target.full_name,
-                            issue_task.issue_number,
-                            issue_task.title,
-                            repair_push,
-                            repair_base_branch,
-                        )
-                    )
-                except RepairPullRequestError as error:
-                    console.print(
-                        "[red bold]Repair pull request error:[/] "
-                        f"{error}"
-                    )
-                    sys.exit(1)
 
-                console.print()
-                console.print(
-                    "[green bold]Repair pull request created[/]"
-                )
-                console.print(
-                    "[bold]Pull request:[/] "
-                    f"[cyan]#{repair_pull_request.number}[/cyan]"
-                )
-                console.print(
-                    "[bold]URL:[/] "
-                    f"[cyan]{repair_pull_request.url}[/cyan]"
-                )
-                console.print(
-                    "[bold]Base:[/] "
-                    f"[cyan]{repair_pull_request.base_branch}[/cyan]"
-                )
-                console.print(
-                    "[bold]Head:[/] "
-                    f"[cyan]{repair_pull_request.head_branch}[/cyan]"
-                )
-                console.print(
-                    "[bold]Commit:[/] "
-                    f"[cyan]{repair_pull_request.commit_sha}[/cyan]"
-                )
-                try:
-                    repair_ci_status = wait_for_repair_ci_status(
-                        repair_pull_request.repository,
-                        repair_pull_request.commit_sha,
-                    )
-                except RepairCIStatusError as error:
-                    console.print(
-                        "[red bold]Repair CI status error:[/] "
-                        f"{error}"
-                    )
-                    sys.exit(1)
 
-                console.print()
-                console.print(
-                    "[green bold]Repair CI status[/]"
-                )
-                console.print(
-                    "[bold]State:[/] "
-                    f"[cyan]{repair_ci_status.state}[/cyan]"
-                )
-                console.print(
-                    "[bold]Check runs:[/]"
-                )
-
-                if repair_ci_status.check_runs:
-                    for check_run in repair_ci_status.check_runs:
-                        conclusion = (
-                            check_run.conclusion
-                            if check_run.conclusion is not None
-                            else "-"
-                        )
-                        console.print(
-                            "  "
-                            f"[cyan]{check_run.name}[/cyan]: "
-                            f"{check_run.status} / "
-                            f"{conclusion}"
-                        )
-
-                        if check_run.details_url is not None:
-                            console.print(
-                                "    "
-                                "[bold]URL:[/] "
-                                f"[cyan]{check_run.details_url}[/cyan]"
-                            )
-                else:
-                    console.print(
-                        "  [dim]No check runs found[/dim]"
-                    )
-                if repair_ci_status.state == "failure":
-                    check_logs = {}
-
-                    for check_run in repair_ci_status.check_runs:
-                        if check_run.conclusion == "success":
-                            continue
-
-                        try:
-                            check_logs[check_run.name] = (
-                                fetch_repair_check_log(
-                                    repair_ci_status.repository,
-                                    check_run,
-                                )
-                            )
-                        except RepairCIStatusError as error:
-                            console.print(
-                                "[yellow bold]"
-                                "Repair CI log warning:"
-                                "[/] "
-                                f"{error}"
-                            )
-
-                    ci_failure_prompt = (
-                        build_repair_ci_failure_prompt(
-                            repair_ci_status,
-                            check_logs=check_logs,
-                        )
-                    )
-                    _run_once(agent, ci_failure_prompt)
-
-                    try:
-                        ci_repair_summary = (
-                            collect_post_repair_summary(
-                                repair_branch
-                            )
-                        )
-                    except PostRepairSummaryError as error:
-                        console.print(
-                            "[red bold]"
-                            "Post-repair summary error:"
-                            "[/] "
-                            f"{error}"
-                        )
-                        sys.exit(1)
-
-                    if ci_repair_summary.has_changes:
-                        try:
-                            ci_repair_validation = (
-                                run_post_repair_validation()
-                            )
-                        except PostRepairValidationError as error:
-                            console.print(
-                                "[red bold]"
-                                "Post-repair validation error:"
-                                "[/] "
-                                f"{error}"
-                            )
-                            sys.exit(1)
-
-                        if not ci_repair_validation.passed:
-                            sys.exit(1)
-
-                        if issue_task.issue_number is None:
-                            console.print(
-                                "[red bold]Repair commit error:[/] "
-                                "GitHub Issue number is unavailable."
-                            )
-                            sys.exit(1)
-                        try:
-                            ci_repair_commit = (
-                                create_repair_commit(
-                                    issue_task.issue_number,
-                                    issue_task.title,
-                                )
-                            )
-                        except RepairCommitError as error:
-                            console.print(
-                                "[red bold]Repair commit error:[/] "
-                                f"{error}"
-                            )
-                            sys.exit(1)
-
-                        try:
-                            ci_repair_push = push_repair_branch(
-                                repair_branch,
-                                ci_repair_commit.sha,
-                            )
-                        except RepairPushError as error:
-                            console.print(
-                                "[red bold]Repair push error:[/] "
-                                f"{error}"
-                            )
-                            sys.exit(1)
-
-                        try:
-                            ci_repair_status = wait_for_repair_ci_status(
-                                repair_pull_request.repository,
-                                ci_repair_push.commit_sha,
-                            )
-                        except RepairCIStatusError as error:
-                            console.print(
-                                "[red bold]Repair CI status error:[/] "
-                                f"{error}"
-                            )
-                            sys.exit(1)
-
-                        console.print()
-                        console.print(
-                            "[green bold]Repair CI retry status[/]"
-                        )
-                        console.print(
-                            "[bold]State:[/] "
-                            f"[cyan]{ci_repair_status.state}[/cyan]"
-                        )
-                        console.print(
-                            "[bold]Check runs:[/]"
-                        )
-
-                        if ci_repair_status.check_runs:
-                            for check_run in ci_repair_status.check_runs:
-                                conclusion = (
-                                    check_run.conclusion
-                                    if check_run.conclusion is not None
-                                    else "-"
-                                )
-                                console.print(
-                                    "  "
-                                    f"[cyan]{check_run.name}[/cyan]: "
-                                    f"{check_run.status} / "
-                                    f"{conclusion}"
-                                )
-
-                                if check_run.details_url is not None:
-                                    console.print(
-                                        "    "
-                                        "[bold]URL:[/] "
-                                        f"[cyan]{check_run.details_url}[/cyan]"
-                                    )
-                        else:
-                            console.print(
-                                "  [dim]No check runs found[/dim]"
-                            )
-
-                        if ci_repair_status.state == "failure":
-                            sys.exit(1)
-                    else:
-                        console.print(
-                            "[red bold]"
-                            "CI repair produced no repository changes."
-                            "[/]"
-                        )
-                        sys.exit(1)
-
-            else:
-                console.print(
-                    "[yellow]"
-                    "No repository changes were produced."
-                    "[/yellow]"
-                )
+            return
 
         return
+
 
     # one-shot prompt mode
     if args.prompt:
