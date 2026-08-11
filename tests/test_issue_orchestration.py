@@ -8,6 +8,48 @@ from corecoder.repair_push import RepairPush
 from corecoder.repair_pr import RepairPullRequest
 from corecoder.repair_ci import RepairCIStatus
 
+
+def test_workflow_state_has_stable_string_values():
+    assert issue_orchestration.WorkflowState.REPAIR.value == "repair"
+    assert (
+        issue_orchestration.WorkflowState.COLLECT_SUMMARY.value
+        == "collect_summary"
+    )
+    assert issue_orchestration.WorkflowState.VALIDATE.value == "validate"
+    assert (
+    issue_orchestration.WorkflowState.CI_RETRY_SUMMARY.value
+    == "ci_retry_summary"
+    )
+    assert issue_orchestration.WorkflowState.COMPLETED.value == "completed"
+
+
+def test_workflow_state_machine_starts_at_repair_and_transitions():
+    machine = issue_orchestration.WorkflowStateMachine()
+
+    assert machine.state == issue_orchestration.WorkflowState.REPAIR
+
+    machine.transition(
+        issue_orchestration.WorkflowState.COLLECT_SUMMARY
+    )
+
+    assert (
+        machine.state
+        == issue_orchestration.WorkflowState.COLLECT_SUMMARY
+    )
+
+
+def test_workflow_state_machine_rejects_invalid_transition():
+    machine = issue_orchestration.WorkflowStateMachine()
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid workflow transition",
+    ):
+        machine.transition(
+            issue_orchestration.WorkflowState.COMMIT
+        )
+
+
 def test_run_issue_workflow_dry_run_runs_agent_once():
     prompts = []
 
@@ -21,6 +63,7 @@ def test_run_issue_workflow_dry_run_runs_agent_once():
         "Analyze and repair this Issue.",
     ]
     assert result is None
+
 
 def test_run_issue_workflow_repair_collects_post_repair_summary():
     calls = []
@@ -123,6 +166,8 @@ def test_run_issue_workflow_repair_collects_post_repair_summary():
     assert result.push == expected_push
     assert result.pull_request == expected_pull_request
     assert result.ci_status == expected_ci_status
+    assert result.state == issue_orchestration.WorkflowState.COMPLETED
+
 
 def test_run_issue_workflow_repair_skips_validation_without_changes():
     prompts = []
@@ -152,6 +197,10 @@ def test_run_issue_workflow_repair_skips_validation_without_changes():
     ]
     assert result.summary == summary
     assert result.validation is None
+    assert (
+    result.state
+    == issue_orchestration.WorkflowState.COLLECT_SUMMARY
+    )
 
 
 def test_run_issue_workflow_repair_requires_validation_for_changes():
@@ -171,6 +220,8 @@ def test_run_issue_workflow_repair_requires_validation_for_changes():
             run_agent=lambda prompt: None,
             collect_summary=lambda branch: summary,
         )
+
+
 def test_run_issue_workflow_repair_returns_validation_result():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -230,6 +281,7 @@ def test_run_issue_workflow_repair_returns_validation_result():
     assert result.pull_request == pull_request
     assert result.ci_status == ci_status
 
+
 def test_run_issue_workflow_stops_after_failed_validation():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -263,6 +315,8 @@ def test_run_issue_workflow_stops_after_failed_validation():
 
     assert result.summary == summary
     assert result.validation == validation
+    assert result.state == issue_orchestration.WorkflowState.VALIDATE
+
 
 def test_run_issue_workflow_creates_commit_after_passed_validation():
     calls = []
@@ -330,6 +384,7 @@ def test_run_issue_workflow_creates_commit_after_passed_validation():
     assert result.push == push
     assert result.pull_request == pull_request
     assert result.ci_status == ci_status
+
 
 def test_run_issue_workflow_requires_commit_after_passed_validation():
     summary = PostRepairSummary(
@@ -468,6 +523,7 @@ def test_run_issue_workflow_requires_push_after_commit():
             create_commit=lambda: commit,
         )
 
+
 def test_run_issue_workflow_creates_pull_request_after_push():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -535,6 +591,7 @@ def test_run_issue_workflow_creates_pull_request_after_push():
     assert result.pull_request == pull_request
     assert result.ci_status == ci_status
 
+
 def test_run_issue_workflow_requires_pull_request_after_push():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -576,6 +633,8 @@ def test_run_issue_workflow_requires_pull_request_after_push():
             create_commit=lambda: commit,
             push_commit=lambda branch, commit_sha: push,
         )
+
+
 def test_run_issue_workflow_waits_for_ci_after_pull_request():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -643,6 +702,7 @@ def test_run_issue_workflow_waits_for_ci_after_pull_request():
     assert result.pull_request == pull_request
     assert result.ci_status == ci_status
 
+
 def test_run_issue_workflow_requires_ci_after_pull_request():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -695,6 +755,7 @@ def test_run_issue_workflow_requires_ci_after_pull_request():
             push_commit=lambda branch, commit_sha: push,
             create_pull_request=lambda received_push: pull_request,
         )
+
 
 def test_run_issue_workflow_runs_agent_again_after_ci_failure():
     summary = PostRepairSummary(
@@ -776,6 +837,7 @@ def test_run_issue_workflow_runs_agent_again_after_ci_failure():
     assert result.ci_status == ci_status
     assert result.ci_retry_status == retry_ci_status
 
+
 def test_run_issue_workflow_requires_failure_prompt_after_ci_failure():
     summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -839,6 +901,7 @@ def test_run_issue_workflow_requires_failure_prompt_after_ci_failure():
             create_pull_request=lambda received_push: pull_request,
             wait_for_ci=lambda received_pull_request: ci_status,
         )
+
 
 def test_run_issue_workflow_collects_summary_after_ci_repair():
     initial_summary = PostRepairSummary(
@@ -929,6 +992,7 @@ def test_run_issue_workflow_collects_summary_after_ci_repair():
     assert result.ci_retry_summary == retry_summary
     assert result.ci_retry_status == retry_ci_status
 
+
 def test_run_issue_workflow_rejects_ci_repair_without_changes():
     initial_summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -1007,6 +1071,7 @@ def test_run_issue_workflow_rejects_ci_repair_without_changes():
                 "Repair the failed CI."
             ),
         )
+
 
 def test_run_issue_workflow_validates_ci_repair_changes():
     initial_summary = PostRepairSummary(
@@ -1113,6 +1178,7 @@ def test_run_issue_workflow_validates_ci_repair_changes():
     assert result.ci_retry_validation == retry_validation
     assert result.ci_retry_status == retry_ci_status
 
+
 def test_run_issue_workflow_stops_after_failed_ci_retry_validation():
     initial_summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -1211,6 +1277,7 @@ def test_run_issue_workflow_stops_after_failed_ci_retry_validation():
                 "Repair the failed CI."
             ),
         )
+
 
 def test_run_issue_workflow_creates_commit_after_ci_retry_validation():
     initial_summary = PostRepairSummary(
@@ -1331,6 +1398,7 @@ def test_run_issue_workflow_creates_commit_after_ci_retry_validation():
     assert commit_calls == [None, None]
     assert result.ci_retry_commit == retry_commit
     assert result.ci_retry_status == retry_ci_status
+
 
 def test_run_issue_workflow_pushes_ci_retry_commit():
     initial_summary = PostRepairSummary(
@@ -1477,6 +1545,7 @@ def test_run_issue_workflow_pushes_ci_retry_commit():
     assert result.ci_retry_push == retry_push
     assert result.ci_retry_status == retry_ci_status
 
+
 def test_run_issue_workflow_waits_for_ci_after_retry_push():
     initial_summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -1622,6 +1691,7 @@ def test_run_issue_workflow_waits_for_ci_after_retry_push():
     assert retry_ci_calls == [retry_push]
     assert result.ci_retry_status == retry_ci_status
 
+
 def test_run_issue_workflow_requires_retry_ci_after_retry_push():
     initial_summary = PostRepairSummary(
         branch="devpilot/issue-21-fix-scan-limit",
@@ -1762,6 +1832,7 @@ def test_run_issue_workflow_requires_retry_ci_after_retry_push():
             retry_commit.sha,
         ),
     ]
+
 
 def test_run_issue_workflow_fails_when_ci_retry_fails():
     initial_summary = PostRepairSummary(
