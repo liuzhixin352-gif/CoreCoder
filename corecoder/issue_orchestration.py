@@ -1,6 +1,5 @@
 """DevPilot GitHub Issue workflow orchestration."""
 import json
-from typing import Self
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -100,7 +99,7 @@ class WorkflowStateMachine:
     def from_checkpoint(
         cls,
         checkpoint: "WorkflowCheckpoint",
-    ) -> Self:
+    ) -> "WorkflowStateMachine":
         return cls(state=checkpoint.state)
 
 
@@ -217,7 +216,7 @@ class WorkflowCheckpoint:
     def from_dict(
         cls,
         data: dict[str, object],
-    ) -> Self:
+    ) -> "WorkflowCheckpoint":
         summary_data = data.get("summary")
         summary = None
 
