@@ -1,7 +1,7 @@
 """Tests for the GtHub Issue CLI workflow."""
 
 import sys
-
+from json import JSONDecodeError
 import pytest
 from corecoder.repair_ci import (
     RepairCIStatus,
@@ -19,6 +19,10 @@ from corecoder.issue_workflow import IssueWorkflowError
 from corecoder.post_repair import (
     PostRepairSummary,
     PostRepairSummaryError,
+)
+from corecoder.issue_orchestration import (
+    WorkflowCheckpoint,
+    WorkflowState,
 )
 from corecoder.post_repair_validation import (
     PostRepairValidation,
@@ -2821,6 +2825,27 @@ def test_parse_args_rejects_dry_run_without_issue(
     assert error.value.code == 2
     assert "--dry-run requires --issue" in capsys.readouterr().err
 
+def test_parse_args_rejects_resume_workflow_without_issue(
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--resume-workflow",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli._parse_args()
+
+    assert error.value.code == 2
+    assert (
+        "--resume-workflow requires --issue"
+        in capsys.readouterr().err
+    )
 
 def test_parse_args_rejects_prompt_and_issue_together(
     monkeypatch,
@@ -4333,3 +4358,390 @@ def test_main_delegates_issue_repair_to_orchestrator(
     )
 
     cli.main()
+
+    workflow_kwargs = captured["workflow_kwargs"]
+
+    assert workflow_kwargs["workflow_id"] == "example/project#21"
+    assert callable(workflow_kwargs["save_checkpoint"])
+
+def test_main_resumes_issue_workflow_without_recreating_repair_branch(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    checkpoint = WorkflowCheckpoint(
+        workflow_id="example/project#21",
+        state=WorkflowState.VALIDATE,
+        repair_branch=(
+            "devpilot/issue-21-fix-repository-scan-limit"
+        ),
+        repair_base_branch="devpilot-v1",
+        summary=PostRepairSummary(
+            branch=(
+                "devpilot/issue-21-fix-repository-scan-limit"
+            ),
+            changes=(" M corecoder/example.py",),
+        ),
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(
+            status="dirty",
+            changes=(" M corecoder/example.py",),
+        ),
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "load_workflow_checkpoint",
+        lambda path: checkpoint,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+    cli,
+    "get_current_branch",
+    lambda: checkpoint.repair_branch,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "create_repair_branch",
+        lambda task: pytest.fail(
+            "Resume must not create a new repair branch"
+        ),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "repair prompt",
+    )
+
+    def fake_run_issue_workflow(**kwargs):
+        captured["workflow_kwargs"] = kwargs
+        return None
+
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        fake_run_issue_workflow,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--resume-workflow",
+        ],
+    )
+
+    cli.main()
+
+    workflow_kwargs = captured["workflow_kwargs"]
+
+    assert workflow_kwargs["repair_branch"] == (
+        checkpoint.repair_branch
+    )
+    assert workflow_kwargs["repair_base_branch"] == (
+    checkpoint.repair_base_branch
+    )
+    assert workflow_kwargs["checkpoint"] == checkpoint
+
+def test_main_rejects_resume_checkpoint_for_different_workflow(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    checkpoint = WorkflowCheckpoint(
+        workflow_id="example/project#999",
+        state=WorkflowState.VALIDATE,
+        repair_branch=(
+            "devpilot/issue-999-fix-repository-scan-limit"
+        ),
+        repair_base_branch="devpilot-v1",
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(status="dirty"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_workflow_checkpoint",
+        lambda path: checkpoint,
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "repair prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--resume-workflow",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.main()
+
+def test_main_rejects_resume_checkpoint_without_base_branch(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    checkpoint = WorkflowCheckpoint(
+        workflow_id="example/project#21",
+        state=WorkflowState.VALIDATE,
+        repair_branch=(
+            "devpilot/issue-21-fix-repository-scan-limit"
+        ),
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(status="dirty"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_workflow_checkpoint",
+        lambda path: checkpoint,
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "repair prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--resume-workflow",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.main()
+
+def test_main_rejects_resume_checkpoint_on_wrong_current_branch(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    checkpoint = WorkflowCheckpoint(
+        workflow_id="example/project#21",
+        state=WorkflowState.VALIDATE,
+        repair_branch=(
+            "devpilot/issue-21-fix-repository-scan-limit"
+        ),
+        repair_base_branch="devpilot-v1",
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(status="dirty"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_workflow_checkpoint",
+        lambda path: checkpoint,
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_current_branch",
+        lambda: "devpilot-v1",
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_issue_repair_prompt",
+        lambda *args, **kwargs: "repair prompt",
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_issue_workflow",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--resume-workflow",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.main()
+
+def test_main_reports_missing_resume_checkpoint(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(status="clean"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_workflow_checkpoint",
+        lambda path: (_ for _ in ()).throw(
+            FileNotFoundError("checkpoint missing")
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--resume-workflow",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.main()
+
+def test_main_reports_invalid_resume_checkpoint(
+    monkeypatch,
+):
+    captured = {}
+
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_github_issue",
+        lambda **kwargs: _sample_task(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_issue_repository",
+        lambda received_task: _repository_preflight(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_worktree",
+        lambda: _worktree_preflight(status="clean"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_workflow_checkpoint",
+        lambda path: (_ for _ in ()).throw(
+            JSONDecodeError(
+                "invalid checkpoint",
+                "{",
+                0,
+            )
+        ),
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--issue",
+            _ISSUE_URL,
+            "--resume-workflow",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.main()
