@@ -1,5 +1,5 @@
 """Base class for all tools."""
-
+import asyncio
 from abc import ABC, abstractmethod
 
 
@@ -14,6 +14,13 @@ class Tool(ABC):
     def execute(self, **kwargs) -> str:
         """Run the tool and return a text result."""
         ...
+
+    async def aexecute(self, **kwargs) -> str:
+        """Run the tool asynchronously."""
+        return await asyncio.to_thread(
+            self.execute,
+            **kwargs,
+        )
 
     def schema(self) -> dict:
         """OpenAI function-calling schema."""

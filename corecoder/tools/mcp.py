@@ -27,22 +27,24 @@ class MCPToolAdapter(Tool):
         self.description = description or ""
         self.parameters = parameters
 
+    async def aexecute(self, **kwargs) -> str:
+        async with Client(self._server) as client:
+            result = await client.call_tool(
+                self.name,
+                kwargs,
+            )
+
+        text = _result_text(result)
+
+        if result.is_error:
+            raise RuntimeError(text)
+
+        return text
+
     def execute(self, **kwargs) -> str:
-        async def call_tool() -> str:
-            async with Client(self._server) as client:
-                result = await client.call_tool(
-                    self.name,
-                    kwargs,
-                )
-
-            text = _result_text(result)
-
-            if result.is_error:
-                raise RuntimeError(text)
-
-            return text
-
-        return asyncio.run(call_tool())
+        return asyncio.run(
+            self.aexecute(**kwargs)
+        )
 
 
 async def _load_mcp_tools(
