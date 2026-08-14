@@ -19,6 +19,10 @@ def test_workflow_state_has_stable_string_values():
     )
     assert issue_orchestration.WorkflowState.VALIDATE.value == "validate"
     assert (
+    issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL.value
+    == "wait_commit_approval"
+    )
+    assert (
     issue_orchestration.WorkflowState.CI_RETRY_SUMMARY.value
     == "ci_retry_summary"
     )
@@ -38,6 +42,25 @@ def test_workflow_state_machine_starts_at_repair_and_transitions():
         machine.state
         == issue_orchestration.WorkflowState.COLLECT_SUMMARY
     )
+def test_workflow_state_machine_requires_commit_approval():
+    machine = issue_orchestration.WorkflowStateMachine(
+        state=issue_orchestration.WorkflowState.VALIDATE
+    )
+
+    machine.transition(
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL
+    )
+
+    assert (
+        machine.state
+        == issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL
+    )
+
+    machine.transition(
+        issue_orchestration.WorkflowState.COMMIT
+    )
+
+    assert machine.state == issue_orchestration.WorkflowState.COMMIT
 
 
 def test_workflow_state_machine_rejects_invalid_transition():
@@ -302,6 +325,15 @@ def test_restored_workflow_state_machine_continues_from_checkpoint():
     )
 
     machine.transition(
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL
+    )
+
+    assert (
+        machine.state
+        == issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL
+    )
+
+    machine.transition(
         issue_orchestration.WorkflowState.COMMIT
     )
 
@@ -344,27 +376,137 @@ def test_run_issue_workflow_resumes_from_validate_checkpoint():
     )
 
     def run_agent(prompt):
-        pytest.fail("Agent must not rerun when resuming from VALIDATE")
+            pytest.fail("Agent must not rerun when resuming from VALIDATE")
 
     def collect_summary(branch):
-        pytest.fail(
-            "Summary must come from checkpoint when resuming "
-            "from VALIDATE"
+            pytest.fail(
+                "Summary must come from checkpoint when resuming "
+                "from VALIDATE"
+            )
+
+    result = issue_orchestration.run_issue_workflow(
+            issue_prompt="Repair this Issue.",
+            dry_run=False,
+            repair_branch="devpilot/issue-21-fix-scan-limit",
+            run_agent=run_agent,
+            collect_summary=collect_summary,
+            run_validation=lambda: validation,
+            checkpoint=checkpoint,
         )
+
+    assert result.summary == summary
+    assert result.validation == validation
+    assert result.state == issue_orchestration.WorkflowState.VALIDATE
+
+def test_run_issue_workflow_resumes_from_commit_approval_checkpoint():
+    summary = PostRepairSummary(
+        branch="devpilot/issue-21-fix-scan-limit",
+        changes=(" M corecoder/example.py",),
+    )
+    validation = PostRepairValidation(
+        command=("python", "-m", "pytest", "tests", "-q"),
+        status="passed",
+        exit_code=0,
+        passed_count=391,
+        failed_count=0,
+        error_count=0,
+        output="391 passed",
+    )
+    checkpoint = issue_orchestration.WorkflowCheckpoint(
+        workflow_id="issue-21",
+        state=issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
+        repair_branch="devpilot/issue-21-fix-scan-limit",
+        summary=summary,
+        validation=validation,
+    )
+    approval_calls = 0
+
+    def request_commit_approval(saved_summary, saved_validation):
+        nonlocal approval_calls
+        approval_calls += 1
+        assert saved_summary == summary
+        assert saved_validation == validation
+        return True
+
+    def create_commit():
+        raise RuntimeError("commit reached")
+
+    with pytest.raises(
+        RuntimeError,
+        match="commit reached",
+    ):
+        issue_orchestration.run_issue_workflow(
+            issue_prompt="Repair this Issue.",
+            dry_run=False,
+            repair_branch="devpilot/issue-21-fix-scan-limit",
+            run_agent=lambda prompt: pytest.fail(
+                "Agent must not rerun"
+            ),
+            collect_summary=lambda branch: pytest.fail(
+                "Summary must come from checkpoint"
+            ),
+            run_validation=lambda: pytest.fail(
+                "Validation must come from checkpoint"
+            ),
+            request_commit_approval=request_commit_approval,
+            create_commit=create_commit,
+            checkpoint=checkpoint,
+        )
+
+    assert approval_calls == 1
+
+def test_run_issue_workflow_stays_waiting_when_commit_approval_is_rejected():
+    summary = PostRepairSummary(
+        branch="devpilot/issue-21-fix-scan-limit",
+        changes=(" M corecoder/example.py",),
+    )
+    validation = PostRepairValidation(
+        command=("python", "-m", "pytest", "tests", "-q"),
+        status="passed",
+        exit_code=0,
+        passed_count=391,
+        failed_count=0,
+        error_count=0,
+        output="391 passed",
+    )
+    checkpoint = issue_orchestration.WorkflowCheckpoint(
+        workflow_id="issue-21",
+        state=issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
+        repair_branch="devpilot/issue-21-fix-scan-limit",
+        summary=summary,
+        validation=validation,
+    )
+    approval_calls = 0
+
+    def request_commit_approval(saved_summary, saved_validation):
+        nonlocal approval_calls
+        approval_calls += 1
+        assert saved_summary == summary
+        assert saved_validation == validation
+        return False
 
     result = issue_orchestration.run_issue_workflow(
         issue_prompt="Repair this Issue.",
         dry_run=False,
         repair_branch="devpilot/issue-21-fix-scan-limit",
-        run_agent=run_agent,
-        collect_summary=collect_summary,
-        run_validation=lambda: validation,
+        run_agent=lambda prompt: pytest.fail(
+            "Agent must not rerun"
+        ),
+        collect_summary=lambda branch: pytest.fail(
+            "Summary must come from checkpoint"
+        ),
+        run_validation=lambda: pytest.fail(
+            "Validation must come from checkpoint"
+        ),
+        request_commit_approval=request_commit_approval,
+        create_commit=lambda: pytest.fail(
+            "Rejected approval must not create a commit"
+        ),
         checkpoint=checkpoint,
     )
 
-    assert result.summary == summary
-    assert result.validation == validation
-    assert result.state == issue_orchestration.WorkflowState.VALIDATE
+    assert result is None
+    assert approval_calls == 1
 
 
 def test_run_issue_workflow_rejects_validate_checkpoint_without_summary():
@@ -2182,6 +2324,46 @@ def test_run_issue_workflow_emits_validate_checkpoint_after_summary():
             summary=summary,
         )
     ]
+def test_run_issue_workflow_waits_for_commit_approval_after_validation():
+    summary = PostRepairSummary(
+        branch="devpilot/issue-21-fix-scan-limit",
+        changes=(" M corecoder/example.py",),
+    )
+    validation = PostRepairValidation(
+        command=("python", "-m", "pytest", "tests", "-q"),
+        status="passed",
+        exit_code=0,
+        passed_count=391,
+        failed_count=0,
+        error_count=0,
+        output="391 passed",
+    )
+    checkpoints = []
+
+    issue_orchestration.run_issue_workflow(
+        issue_prompt="Repair this Issue.",
+        dry_run=False,
+        repair_branch="devpilot/issue-21-fix-scan-limit",
+        repair_base_branch="devpilot-v1",
+        workflow_id="issue-21",
+        run_agent=lambda prompt: None,
+        collect_summary=lambda branch: summary,
+        run_validation=lambda: validation,
+        create_commit=lambda: pytest.fail(
+            "Commit must wait for approval"
+        ),
+        request_commit_approval=lambda saved_summary, saved_validation: False,
+        save_checkpoint=checkpoints.append,
+    )
+
+    assert checkpoints[-1] == issue_orchestration.WorkflowCheckpoint(
+        workflow_id="issue-21",
+        state=issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
+        repair_branch="devpilot/issue-21-fix-scan-limit",
+        repair_base_branch="devpilot-v1",
+        summary=summary,
+        validation=validation,
+    )
 
 def test_run_issue_workflow_emits_commit_checkpoint_after_validation():
     summary = PostRepairSummary(
@@ -2215,12 +2397,14 @@ def test_run_issue_workflow_emits_commit_checkpoint_after_validation():
             run_agent=lambda prompt: None,
             collect_summary=lambda branch: summary,
             run_validation=lambda: validation,
+            request_commit_approval=lambda saved_summary, saved_validation: True,
             create_commit=create_commit,
             save_checkpoint=checkpoints.append,
         )
 
     assert [checkpoint.state for checkpoint in checkpoints] == [
         issue_orchestration.WorkflowState.VALIDATE,
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
         issue_orchestration.WorkflowState.COMMIT,
     ]
 
@@ -2276,6 +2460,7 @@ def test_run_issue_workflow_emits_push_checkpoint_after_commit():
 
     assert [checkpoint.state for checkpoint in checkpoints] == [
         issue_orchestration.WorkflowState.VALIDATE,
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
         issue_orchestration.WorkflowState.COMMIT,
         issue_orchestration.WorkflowState.PUSH,
     ]
@@ -2339,6 +2524,7 @@ def test_run_issue_workflow_emits_create_pr_checkpoint_after_push():
 
     assert [checkpoint.state for checkpoint in checkpoints] == [
         issue_orchestration.WorkflowState.VALIDATE,
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
         issue_orchestration.WorkflowState.COMMIT,
         issue_orchestration.WorkflowState.PUSH,
         issue_orchestration.WorkflowState.CREATE_PR,
@@ -2414,6 +2600,7 @@ def test_run_issue_workflow_emits_wait_ci_checkpoint_after_pull_request():
 
     assert [checkpoint.state for checkpoint in checkpoints] == [
         issue_orchestration.WorkflowState.VALIDATE,
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
         issue_orchestration.WorkflowState.COMMIT,
         issue_orchestration.WorkflowState.PUSH,
         issue_orchestration.WorkflowState.CREATE_PR,
@@ -2498,6 +2685,7 @@ def test_run_issue_workflow_emits_ci_repair_checkpoint_after_ci_failure():
 
     assert [checkpoint.state for checkpoint in checkpoints] == [
         issue_orchestration.WorkflowState.VALIDATE,
+        issue_orchestration.WorkflowState.WAIT_COMMIT_APPROVAL,
         issue_orchestration.WorkflowState.COMMIT,
         issue_orchestration.WorkflowState.PUSH,
         issue_orchestration.WorkflowState.CREATE_PR,

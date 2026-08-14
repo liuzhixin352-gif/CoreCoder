@@ -20,6 +20,7 @@ class WorkflowState(str, Enum):
     REPAIR = "repair"
     COLLECT_SUMMARY = "collect_summary"
     VALIDATE = "validate"
+    WAIT_COMMIT_APPROVAL = "wait_commit_approval"
     COMMIT = "commit"
     PUSH = "push"
     CREATE_PR = "create_pr"
@@ -41,6 +42,9 @@ _ALLOWED_TRANSITIONS = {
         WorkflowState.VALIDATE,
     }),
     WorkflowState.VALIDATE: frozenset({
+        WorkflowState.WAIT_COMMIT_APPROVAL,
+    }),
+    WorkflowState.WAIT_COMMIT_APPROVAL: frozenset({
         WorkflowState.COMMIT,
     }),
     WorkflowState.COMMIT: frozenset({
@@ -404,6 +408,9 @@ def run_issue_workflow(
     run_validation: (
         Callable[[], PostRepairValidation] | None
     ) = None,
+    request_commit_approval: (
+        Callable[[PostRepairSummary, PostRepairValidation], bool] | None
+    ) = None,
     create_commit: Callable[[], object] | None = None,
     push_commit: (
         Callable[[str, str], RepairPush] | None
@@ -430,6 +437,7 @@ def run_issue_workflow(
 
         if machine.state not in {
             WorkflowState.VALIDATE,
+            WorkflowState.WAIT_COMMIT_APPROVAL,
             WorkflowState.COMMIT,
             WorkflowState.PUSH,
             WorkflowState.CREATE_PR,
@@ -497,6 +505,7 @@ def run_issue_workflow(
             )
 
     if machine.state in {
+        WorkflowState.WAIT_COMMIT_APPROVAL,
         WorkflowState.COMMIT,
         WorkflowState.PUSH,
         WorkflowState.CREATE_PR,
@@ -577,7 +586,9 @@ def run_issue_workflow(
             )
 
         if machine.state == WorkflowState.VALIDATE:
-            machine.transition(WorkflowState.COMMIT)
+            machine.transition(
+                WorkflowState.WAIT_COMMIT_APPROVAL
+            )
 
             if save_checkpoint is not None:
                 if workflow_id is None:
@@ -596,6 +607,50 @@ def run_issue_workflow(
                     )
                 )
 
+            if (
+                request_commit_approval is not None
+                and not request_commit_approval(summary, validation)
+            ):
+                return None
+
+            machine.transition(WorkflowState.COMMIT)
+
+            if save_checkpoint is not None:
+                save_checkpoint(
+                    WorkflowCheckpoint(
+                        workflow_id=workflow_id,
+                        state=machine.state,
+                        repair_branch=repair_branch,
+                        repair_base_branch=repair_base_branch,
+                        summary=summary,
+                        validation=validation,
+                    )
+                )
+        elif machine.state == WorkflowState.WAIT_COMMIT_APPROVAL:
+            if (
+                request_commit_approval is not None
+                and not request_commit_approval(summary, validation)
+            ):
+                return None
+
+            machine.transition(WorkflowState.COMMIT)
+
+            if save_checkpoint is not None:
+                if workflow_id is None:
+                    raise ValueError(
+                        "workflow_id is required when save_checkpoint is provided"
+                    )
+
+                save_checkpoint(
+                    WorkflowCheckpoint(
+                        workflow_id=workflow_id,
+                        state=machine.state,
+                        repair_branch=repair_branch,
+                        repair_base_branch=repair_base_branch,
+                        summary=summary,
+                        validation=validation,
+                    )
+                )
         commit = create_commit()
 
     if machine.state in {
