@@ -27,10 +27,12 @@ from .issue_workflow import (
     build_issue_repair_prompt,
 )
 from .post_repair import (
+    PostRepairSummary,
     PostRepairSummaryError,
     collect_post_repair_summary,
 )
 from .post_repair_validation import (
+    PostRepairValidation,
     PostRepairValidationError,
     run_post_repair_validation,
 )
@@ -165,6 +167,27 @@ def _parse_args():
         )
 
     return args
+
+def _request_commit_approval(
+    summary: PostRepairSummary,
+    validation: PostRepairValidation,
+) -> bool:
+    console.print()
+    console.print("[bold]Commit approval required[/]")
+
+    for change in summary.changes:
+        console.print(f"  [yellow]{change}[/yellow]")
+
+    console.print(
+        "[bold]Validation:[/] "
+        f"{validation.passed_count} passed"
+    )
+
+    response = pt_prompt(
+        "Approve commit? [approve/reject] > "
+    ).strip().lower()
+
+    return response == "approve"
 
 
 def main():
@@ -641,6 +664,7 @@ def main():
                     save_checkpoint=save_checkpoint_to_disk,
                     collect_summary=collect_post_repair_summary,
                     run_validation=run_post_repair_validation,
+                    request_commit_approval=_request_commit_approval,
                     create_commit=lambda: create_repair_commit(
                         issue_task.issue_number,
                         issue_task.title,

@@ -2614,7 +2614,11 @@ def _patch_runtime(
                 state="no_checks",
                 check_runs=(),
             )
-
+    monkeypatch.setattr(
+    cli,
+    "_request_commit_approval",
+    lambda summary, validation: True,
+    )
     monkeypatch.setattr(
         cli,
         "check_worktree",
@@ -4363,6 +4367,10 @@ def test_main_delegates_issue_repair_to_orchestrator(
 
     assert workflow_kwargs["workflow_id"] == "example/project#21"
     assert callable(workflow_kwargs["save_checkpoint"])
+    assert (
+    workflow_kwargs["request_commit_approval"]
+    is cli._request_commit_approval
+    )
 
 def test_main_resumes_issue_workflow_without_recreating_repair_branch(
     monkeypatch,
@@ -4745,3 +4753,55 @@ def test_main_reports_invalid_resume_checkpoint(
 
     with pytest.raises(SystemExit):
         cli.main()
+
+def test_request_commit_approval_accepts_approve(monkeypatch):
+    summary = PostRepairSummary(
+        branch="devpilot/issue-21-fix-scan-limit",
+        changes=(" M corecoder/example.py",),
+    )
+    validation = PostRepairValidation(
+        command=("python", "-m", "pytest", "tests", "-q"),
+        status="passed",
+        exit_code=0,
+        passed_count=101,
+        failed_count=0,
+        error_count=0,
+        output="101 passed",
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "pt_prompt",
+        lambda prompt: "approve",
+    )
+
+    assert cli._request_commit_approval(
+        summary,
+        validation,
+    ) is True
+
+def test_request_commit_approval_accepts_reject(monkeypatch):
+    summary = PostRepairSummary(
+        branch="devpilot/issue-21-fix-scan-limit",
+        changes=(" M corecoder/example.py",),
+    )
+    validation = PostRepairValidation(
+        command=("python", "-m", "pytest", "tests", "-q"),
+        status="passed",
+        exit_code=0,
+        passed_count=101,
+        failed_count=0,
+        error_count=0,
+        output="101 passed",
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "pt_prompt",
+        lambda prompt: "reject",
+    )
+
+    assert cli._request_commit_approval(
+        summary,
+        validation,
+    ) is False
