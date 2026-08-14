@@ -3,6 +3,8 @@
 import sys
 import os
 import argparse
+from json import JSONDecodeError
+from pathlib import Path
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -63,7 +65,13 @@ from .repair_ci import (
 
 from .session import save_session, load_session, list_sessions
 from . import __version__
-from .issue_orchestration import run_issue_workflow
+from .issue_orchestration import (
+    load_workflow_checkpoint,
+    run_issue_workflow,
+    save_workflow_checkpoint,
+)
+
+
 console = Console()
 _DRY_RUN_TOOL_NAMES = frozenset(
     {
@@ -136,12 +144,20 @@ def _parse_args():
             "GitHub repository cannot be verified"
         ),
     )
+    p.add_argument(
+        "--resume-workflow",
+        action="store_true",
+        help="Resume a saved DevPilot Issue workflow checkpoint",
+    )
     p.add_argument("-r", "--resume", metavar="ID", help="Resume a saved session")
     p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args()
 
     if args.dry_run and not args.issue:
         p.error("--dry-run requires --issue")
+
+    if args.resume_workflow and not args.issue:
+        p.error("--resume-workflow requires --issue")
 
     if args.allow_unverified_repository and not args.issue:
         p.error(
@@ -159,6 +175,7 @@ def main():
     repository_preflight = None
     repair_branch = None
     repair_base_branch = None
+    workflow_checkpoint = None
 
 
     if args.issue:
@@ -170,6 +187,14 @@ def main():
             repository_preflight = check_issue_repository(
                 issue_task
             )
+
+            checkpoint_path = (
+                            Path.home()
+                            / ".corecoder"
+                            / "workflows"
+                            / repository_preflight.target.full_name
+                            / f"issue-{issue_task.issue_number}.json"
+                        )
 
             if repository_preflight.status == "mismatch":
                 local_repositories = _format_local_repositories(
@@ -232,7 +257,10 @@ def main():
                     )
                     sys.exit(1)
 
-                if worktree_preflight.status == "dirty":
+                if (
+                    worktree_preflight.status == "dirty"
+                    and not args.resume_workflow
+                ):
                     console.print(
                         "[red bold]Clean worktree required:[/] "
                         "Real Issue repair cannot start while "
@@ -250,14 +278,65 @@ def main():
                         "before starting the repair."
                     )
                     sys.exit(1)
-                repair_base_branch = get_current_branch()
-                repair_branch = create_repair_branch(
-                    issue_task
-                )
-                console.print(
-                    "[green bold]Repair branch created:[/] "
-                    f"[cyan]{repair_branch}[/cyan]"
-                )
+                if args.resume_workflow:
+                    try:
+                        workflow_checkpoint = load_workflow_checkpoint(
+                            checkpoint_path
+                        )
+                    except FileNotFoundError:
+                        console.print(
+                            "[red bold]Workflow checkpoint not found:[/] "
+                            "No saved checkpoint exists for "
+                            "the requested Issue."
+                        )
+                        sys.exit(1)
+                    except JSONDecodeError:
+                        console.print(
+                            "[red bold]Invalid workflow checkpoint:[/] "
+                            "Saved checkpoint contains invalid JSON."
+                        )
+                        sys.exit(1)
+
+
+                    if workflow_checkpoint.workflow_id != (
+                        f"{repository_preflight.target.full_name}"
+                        f"#{issue_task.issue_number}"
+                    ):
+                        console.print(
+                            "[red bold]Workflow checkpoint mismatch:[/] "
+                            "Saved checkpoint does not belong to "
+                            "the requested Issue."
+                        )
+                        sys.exit(1)
+                    if workflow_checkpoint.repair_base_branch is None:
+                        console.print(
+                            "[red bold]Invalid workflow checkpoint:[/] "
+                            "Saved checkpoint is missing the repair base branch."
+                        )
+                        sys.exit(1)
+                    current_branch = get_current_branch()
+
+                    if current_branch != workflow_checkpoint.repair_branch:
+                        console.print(
+                            "[red bold]Workflow branch mismatch:[/] "
+                            "Current Git branch does not match "
+                            "the saved repair branch."
+                        )
+                        sys.exit(1)
+
+                    repair_branch = workflow_checkpoint.repair_branch
+                    repair_base_branch = (
+                        workflow_checkpoint.repair_base_branch
+                    )
+                else:
+                    repair_base_branch = get_current_branch()
+                    repair_branch = create_repair_branch(
+                        issue_task
+                    )
+                    console.print(
+                        "[green bold]Repair branch created:[/] "
+                        f"[cyan]{repair_branch}[/cyan]"
+                    )
             issue_prompt = build_issue_repair_prompt(
                 issue_task,
                 dry_run=args.dry_run,
@@ -531,6 +610,19 @@ def main():
 
                 return ci_status
 
+
+
+            def save_checkpoint_to_disk(checkpoint):
+                checkpoint_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+                save_workflow_checkpoint(
+                    checkpoint,
+                    checkpoint_path,
+                )
+
+
             try:
                 workflow_result = run_issue_workflow(
                     issue_prompt=issue_prompt,
@@ -540,6 +632,13 @@ def main():
                         prompt,
                     ),
                     repair_branch=repair_branch,
+                    repair_base_branch=repair_base_branch,
+                    checkpoint=workflow_checkpoint,
+                    workflow_id=(
+                        f"{repository_preflight.target.full_name}"
+                        f"#{issue_task.issue_number}"
+                    ),
+                    save_checkpoint=save_checkpoint_to_disk,
                     collect_summary=collect_post_repair_summary,
                     run_validation=run_post_repair_validation,
                     create_commit=lambda: create_repair_commit(
