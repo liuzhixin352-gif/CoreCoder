@@ -190,7 +190,37 @@ def test_agent_tool_scope_is_per_instance():
         arguments = {"command": "echo hi"}
 
     assert "unknown tool 'bash'" in agent._exec_tool(_TC())
+def test_agent_executes_mcp_tool_through_existing_tool_interface(
+    tmp_path,
+):
+    from corecoder.mcp_tools import create_mcp_server
+    from corecoder.tools.mcp import load_mcp_tools
 
+    target = tmp_path / "example.txt"
+    target.write_text(
+        "hello from agent through MCP",
+        encoding="utf-8",
+    )
+
+    server = create_mcp_server(
+        repository_root=tmp_path
+    )
+    tools = load_mcp_tools(server)
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=tools,
+    )
+
+    class _TC:
+        name = "read_repository_file"
+        id = "mcp-1"
+        arguments = {"path": "example.txt"}
+
+    assert (
+        agent._exec_tool(_TC())
+        == "hello from agent through MCP"
+    )
 
 def test_exec_tool_distinguishes_bad_args_from_internal_error():
     """A TypeError raised inside a tool must not be reported as bad arguments."""
