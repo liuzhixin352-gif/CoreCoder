@@ -9,8 +9,10 @@ It keeps looping until the LLM responds with plain text (no tool calls),
 which means it's done working and ready to report back.
 """
 
-import concurrent.futures
+import asyncio
 import inspect
+
+from .tool_runtime import run_tool_calls
 from .llm import LLM
 from .tools import ALL_TOOLS
 from .tools.base import Tool
@@ -26,6 +28,7 @@ class Agent:
         tools: list[Tool] | None = None,
         max_context_tokens: int = 128_000,
         max_rounds: int = 50,
+        tool_timeout: float | None = None,
     ):
         self.llm = llm
         self.tools = tools if tools is not None else ALL_TOOLS
@@ -33,6 +36,7 @@ class Agent:
         self.messages: list[dict] = []
         self.context = ContextManager(max_tokens=max_context_tokens)
         self.max_rounds = max_rounds
+        self.tool_timeout = tool_timeout
         self._system = system_prompt(self.tools)
 
         # wire up sub-agent capability
@@ -68,25 +72,17 @@ class Agent:
             self.messages.append(resp.message)
 
             try:
-                if len(resp.tool_calls) == 1:
-                    tc = resp.tool_calls[0]
-                    if on_tool:
-                        on_tool(tc.name, tc.arguments)
-                    result = self._exec_tool(tc)
+                results = self._exec_tools_parallel(
+                    resp.tool_calls,
+                    on_tool,
+                )
+
+                for tc, result in zip(resp.tool_calls, results):
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": result,
                     })
-                else:
-                    # parallel execution for multiple tool calls
-                    results = self._exec_tools_parallel(resp.tool_calls, on_tool)
-                    for tc, result in zip(resp.tool_calls, results):
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result,
-                        })
             except KeyboardInterrupt:
                 # Ctrl+C mid-execution would leave the assistant tool_calls
                 # message without replies, poisoning the next request; backfill
@@ -114,8 +110,35 @@ class Agent:
         except Exception as e:
             return f"Error executing {tc.name}: {e}"
 
+    async def _exec_tool_async(self, tc) -> str:
+        """Execute a single tool call asynchronously."""
+        tool = self._tool_by_name.get(tc.name)
+        if tool is None:
+            return f"Error: unknown tool '{tc.name}'"
+
+        try:
+            inspect.signature(tool.execute).bind(**tc.arguments)
+        except TypeError as e:
+            return f"Error: bad arguments for {tc.name}: {e}"
+
+        try:
+            if self.tool_timeout is None:
+                return await tool.aexecute(**tc.arguments)
+
+            return await asyncio.wait_for(
+                tool.aexecute(**tc.arguments),
+                timeout=self.tool_timeout,
+            )
+        except asyncio.TimeoutError:
+            return (
+                f"Error executing {tc.name}: "
+                f"timed out after {self.tool_timeout} seconds"
+            )
+        except Exception as e:
+            return f"Error executing {tc.name}: {e}"
+
     def _exec_tools_parallel(self, tool_calls, on_tool=None) -> list[str]:
-        """Run multiple tool calls concurrently using threads.
+        """Run tool calls concurrently through the async runtime.
 
         This is inspired by Claude Code's StreamingToolExecutor which starts
         executing tools while the model is still generating.  We simplify to:
@@ -125,9 +148,13 @@ class Agent:
             if on_tool:
                 on_tool(tc.name, tc.arguments)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            futures = [pool.submit(self._exec_tool, tc) for tc in tool_calls]
-            return [f.result() for f in futures]
+        return asyncio.run(
+            run_tool_calls(
+                tool_calls,
+                self._exec_tool_async,
+                max_concurrency=8,
+            )
+        )
 
     def _answer_pending_tool_calls(self, tool_calls):
         """Backfill a tool reply for every call that didn't get one.

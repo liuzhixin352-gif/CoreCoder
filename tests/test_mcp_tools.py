@@ -103,6 +103,35 @@ def test_mcp_tool_adapter_executes_tool_through_mcp(tmp_path):
 
     assert result == "hello through MCP adapter"
 
+def test_mcp_tool_adapter_aexecute_calls_mcp_directly(tmp_path):
+    target = tmp_path / "example.txt"
+    target.write_text(
+        "hello through async MCP adapter",
+        encoding="utf-8",
+    )
+
+    server = create_mcp_server(
+        repository_root=tmp_path
+    )
+
+    tool = load_mcp_tools(server)[0]
+
+    def fail_execute(**kwargs):
+        raise AssertionError(
+            "sync execute should not be used"
+        )
+
+    tool.execute = fail_execute
+
+    async def scenario():
+        return await tool.aexecute(
+            path="example.txt"
+        )
+
+    assert asyncio.run(scenario()) == (
+        "hello through async MCP adapter"
+    )
+
 def test_mcp_tool_adapter_raises_when_mcp_tool_fails(tmp_path):
     repository_root = tmp_path / "repo"
     repository_root.mkdir()

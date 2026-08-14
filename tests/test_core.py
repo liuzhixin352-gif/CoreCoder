@@ -178,6 +178,189 @@ def test_write_tracks_changed_files(tmp_path):
 
 # --- Agent tool execution ---
 
+
+def test_exec_tools_parallel_runs_concurrently_and_preserves_order():
+    import threading
+    import time
+
+    from corecoder.tools.base import Tool
+
+    barrier = threading.Barrier(2)
+
+    class _SlowTool(Tool):
+        name = "slow"
+        description = "slow test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            barrier.wait(timeout=1)
+            time.sleep(0.05)
+            return "slow-result"
+
+    class _FastTool(Tool):
+        name = "fast"
+        description = "fast test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            barrier.wait(timeout=1)
+            return "fast-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowTool(), _FastTool()],
+    )
+
+    class _TC:
+        def __init__(self, name, tool_call_id):
+            self.name = name
+            self.id = tool_call_id
+            self.arguments = {}
+
+    tool_calls = [
+        _TC("slow", "1"),
+        _TC("fast", "2"),
+    ]
+
+    assert agent._exec_tools_parallel(tool_calls) == [
+        "slow-result",
+        "fast-result",
+    ]
+def test_exec_tools_parallel_uses_async_tool_execution():
+    from corecoder.tools.base import Tool
+
+    class _AsyncTool(Tool):
+        name = "async_tool"
+        description = "async test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            raise AssertionError("sync execute should not be used")
+
+        async def aexecute(self):
+            return "async-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_AsyncTool()],
+    )
+
+    class _TC:
+        name = "async_tool"
+        id = "1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "async-result",
+    ]
+
+def test_exec_tools_parallel_times_out_slow_async_tool():
+    import asyncio
+
+    from corecoder.tools.base import Tool
+
+    class _SlowAsyncTool(Tool):
+        name = "slow_async"
+        description = "slow async test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-result"
+
+        async def aexecute(self):
+            await asyncio.sleep(0.2)
+            return "async-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowAsyncTool()],
+        tool_timeout=0.05,
+    )
+
+    class _TC:
+        name = "slow_async"
+        id = "1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error executing slow_async: timed out after 0.05 seconds",
+    ]
+def test_exec_tools_parallel_timeout_does_not_cancel_siblings():
+    import asyncio
+
+    from corecoder.tools.base import Tool
+
+    class _SlowTool(Tool):
+        name = "slow"
+        description = "slow tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-slow"
+
+        async def aexecute(self):
+            await asyncio.sleep(0.2)
+            return "slow-result"
+
+    class _FastTool(Tool):
+        name = "fast"
+        description = "fast tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-fast"
+
+        async def aexecute(self):
+            await asyncio.sleep(0)
+            return "fast-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowTool(), _FastTool()],
+        tool_timeout=0.05,
+    )
+
+    class _TC:
+        def __init__(self, name, tool_call_id):
+            self.name = name
+            self.id = tool_call_id
+            self.arguments = {}
+
+    tool_calls = [
+        _TC("slow", "1"),
+        _TC("fast", "2"),
+    ]
+
+    assert agent._exec_tools_parallel(tool_calls) == [
+        "Error executing slow: timed out after 0.05 seconds",
+        "fast-result",
+    ]
+
+
 def test_agent_tool_scope_is_per_instance():
     """An Agent restricted to a subset of tools must not resolve tools outside it."""
     only_read = [get_tool("read_file")]
