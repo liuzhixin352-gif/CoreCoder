@@ -51,7 +51,16 @@ class Agent:
                 t._parent_agent = self
 
     def _full_messages(self) -> list[dict]:
-        return [{"role": "system", "content": self._system}] + self.messages
+        messages = [
+            {
+                key: value
+                for key, value in message.items()
+                if key != "context_priority"
+            }
+            for message in self.messages
+        ]
+
+        return [{"role": "system", "content": self._system}] + messages
 
     def _tool_schemas(self) -> list[dict]:
         return [t.schema() for t in self.tools]
@@ -70,6 +79,7 @@ class Agent:
             )
         self.messages.append({"role": "user", "content": user_input})
         self.context.maybe_compress(self.messages, self.llm)
+        self._emit_context_trace("pre_llm")
 
         for round_number in range(1, self.max_rounds + 1):
             llm_started_at = time.perf_counter()
@@ -187,6 +197,7 @@ class Agent:
 
             # compress if tool outputs are big
             self.context.maybe_compress(self.messages, self.llm)
+            self._emit_context_trace("post_tool")
 
         if self.tracer is not None:
             self._emit_trace(
@@ -351,6 +362,31 @@ class Agent:
     def reset(self):
         """Clear conversation history."""
         self.messages.clear()
+
+    def _emit_context_trace(self, phase: str) -> None:
+        metrics = self.context.last_metrics
+        if metrics is None:
+            return
+
+        self._emit_trace(
+            TraceEvent(
+                name="context.managed",
+                timestamp=time.time(),
+                attributes={
+                    "phase": phase,
+                    "tokens_before": metrics.tokens_before,
+                    "tokens_after": metrics.tokens_after,
+                    "tokens_saved": metrics.tokens_saved,
+                    "applied_layers": metrics.applied_layers,
+                    "high_priority_messages": (
+                        metrics.high_priority_messages
+                    ),
+                    "priority_preserved_messages": (
+                        metrics.priority_preserved_messages
+                    ),
+                },
+            )
+        )
 
     def _emit_trace(self, event: TraceEvent) -> None:
         """Emit a trace event without affecting agent execution."""
