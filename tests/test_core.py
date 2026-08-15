@@ -47,6 +47,16 @@ def test_estimate_tokens():
     assert t > 0
     assert t < 100
 
+def test_context_budget_reserves_tokens_for_model_output():
+    ctx = ContextManager(
+        max_tokens=1000,
+        reserved_output_tokens=200,
+    )
+
+    assert ctx.input_budget == 800
+    assert ctx._snip_at == 400
+    assert ctx._summarize_at == 560
+    assert ctx._collapse_at == 720
 
 def test_context_snip():
     ctx = ContextManager(max_tokens=3000)
@@ -767,6 +777,7 @@ def test_agent_emits_started_and_completed_trace():
 
     assert [event.name for event in tracer.events] == [
         "agent.started",
+        "context.managed",
         "llm.started",
         "llm.completed",
         "agent.completed",
@@ -779,6 +790,113 @@ def test_agent_emits_started_and_completed_trace():
     assert completed.attributes["run_id"] == started.attributes["run_id"]
     assert completed.attributes["duration_ms"] >= 0
     assert completed.attributes["llm_rounds"] == 1
+
+def test_agent_emits_pre_llm_context_managed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    context_events = [
+        event
+        for event in tracer.events
+        if event.name == "context.managed"
+    ]
+
+    assert len(context_events) == 1
+
+    event = context_events[0]
+
+    assert event.attributes["phase"] == "pre_llm"
+    assert event.attributes["tokens_before"] == (
+        event.attributes["tokens_after"]
+    )
+    assert event.attributes["tokens_saved"] == 0
+    assert event.attributes["applied_layers"] == ()
+    assert event.attributes["high_priority_messages"] == 0
+    assert event.attributes["priority_preserved_messages"] == 0
+    assert "run_id" in event.attributes
+
+def test_agent_emits_post_tool_context_managed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                tool_call = SimpleNamespace(
+                    name="missing_tool",
+                    id="call-1",
+                    arguments={},
+                )
+                return SimpleNamespace(
+                    tool_calls=[tool_call],
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    content="",
+                )
+
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    context_events = [
+        event
+        for event in tracer.events
+        if event.name == "context.managed"
+    ]
+
+    assert len(context_events) == 2
+    assert context_events[0].attributes["phase"] == "pre_llm"
+    assert context_events[1].attributes["phase"] == "post_tool"
+    assert (
+        context_events[0].attributes["run_id"]
+        == context_events[1].attributes["run_id"]
+    )
+
 
 def test_agent_emits_completed_trace_when_max_rounds_reached():
     from types import SimpleNamespace
@@ -840,6 +958,7 @@ def test_agent_emits_failed_trace_when_llm_fails():
 
     assert [event.name for event in tracer.events] == [
         "agent.started",
+        "context.managed",
         "llm.started",
         "llm.failed",
         "agent.failed",
@@ -1012,3 +1131,592 @@ def test_agent_clears_active_run_id_when_tool_execution_is_interrupted():
         agent.chat("hello")
 
     assert agent._active_run_id is None
+
+def test_context_budget_rejects_reserved_output_at_or_above_window():
+    import pytest
+    with pytest.raises(
+        ValueError,
+        match="reserved_output_tokens must be less than max_tokens",
+    ):
+        ContextManager(
+            max_tokens=1000,
+            reserved_output_tokens=1000,
+        )
+
+
+def test_context_budget_rejects_negative_reserved_output():
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="reserved_output_tokens must be non-negative",
+    ):
+        ContextManager(
+            max_tokens=1000,
+            reserved_output_tokens=-1,
+        )
+
+def test_context_manager_records_compression_metrics():
+    ctx = ContextManager(max_tokens=2000)
+
+    messages = []
+    for i in range(20):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 200,
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"t{i}",
+                "content": "b\n" * 1000,
+            }
+        )
+
+    before = estimate_tokens(messages)
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    metrics = ctx.last_metrics
+
+    assert metrics.tokens_before == before
+    assert metrics.tokens_after == estimate_tokens(messages)
+    assert metrics.tokens_saved == (
+        metrics.tokens_before - metrics.tokens_after
+    )
+    assert metrics.tokens_saved > 0
+
+def test_context_manager_records_metrics_without_compression():
+    ctx = ContextManager(max_tokens=2000)
+
+    messages = [
+        {
+            "role": "user",
+            "content": "short message",
+        }
+    ]
+
+    before = estimate_tokens(messages)
+
+    assert ctx.maybe_compress(messages, None) is False
+
+    metrics = ctx.last_metrics
+
+    assert metrics.tokens_before == before
+    assert metrics.tokens_after == before
+    assert metrics.tokens_saved == 0
+    assert metrics.applied_layers == ()
+
+def test_context_metrics_records_applied_compression_layers():
+    ctx = ContextManager(max_tokens=3000)
+
+    messages = [
+        {
+            "role": "tool",
+            "tool_call_id": "t1",
+            "content": "line\n" * 2000,
+        }
+    ]
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert ctx.last_metrics.applied_layers == (
+        "tool_snip",
+    )
+
+
+def test_context_manager_exposes_recent_message_preservation_policy():
+    ctx = ContextManager(
+        max_tokens=2000,
+        keep_recent_messages=6,
+    )
+
+    assert ctx.keep_recent_messages == 6
+
+def test_context_summarization_uses_recent_message_policy():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=6,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"msg {i} " + "a" * 200,
+        }
+        for i in range(12)
+    ]
+
+    expected_recent = [
+        message["content"]
+        for message in messages[-6:]
+    ]
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert len(messages) == 8
+    assert [
+        message["content"]
+        for message in messages[-6:]
+    ] == expected_recent
+
+def test_context_manager_rejects_non_positive_keep_recent_messages():
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="keep_recent_messages must be greater than 0",
+    ):
+        ContextManager(
+            max_tokens=1000,
+            keep_recent_messages=0,
+        )
+
+def test_context_summarization_trigger_follows_recent_message_policy():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=6,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"msg {i} " + "a" * 250,
+        }
+        for i in range(9)
+    ]
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert "summarize" in ctx.last_metrics.applied_layers
+    assert len(messages) == 8
+
+def test_context_summarization_preserves_high_priority_message():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": "Never modify production credentials.",
+            "context_priority": "high",
+        }
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"old msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert any(
+        message.get("content")
+        == "Never modify production credentials."
+        for message in messages
+    )
+
+def test_agent_full_messages_strips_context_engineering_metadata():
+    agent = Agent(
+        llm=None,
+        tools=[],
+    )
+
+    agent.messages.append(
+        {
+            "role": "user",
+            "content": "Never modify production credentials.",
+            "context_priority": "high",
+        }
+    )
+
+    full_messages = agent._full_messages()
+
+    assert agent.messages[0]["context_priority"] == "high"
+    assert "context_priority" not in full_messages[1]
+
+def test_context_preserves_high_priority_tool_result_with_tool_call():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"old msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    tool_index = next(
+        i
+        for i, message in enumerate(messages)
+        if message.get("tool_call_id") == "call-1"
+    )
+
+    assert messages[tool_index - 1]["role"] == "assistant"
+    assert messages[tool_index - 1]["tool_calls"][0]["id"] == "call-1"
+
+def test_context_preserves_entire_tool_group_when_one_result_is_high_priority():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Ordinary file contents.",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"old msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assistant_index = next(
+        i
+        for i, message in enumerate(messages)
+        if {
+            tool_call.get("id")
+            for tool_call in message.get("tool_calls", [])
+        }
+        == {"call-1", "call-2"}
+    )
+
+    assert messages[assistant_index + 1]["tool_call_id"] == "call-1"
+    assert messages[assistant_index + 2]["tool_call_id"] == "call-2"
+
+def test_hard_collapse_preserves_high_priority_message():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    critical_content = (
+        "Never modify production credentials. "
+        + "critical " * 300
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": critical_content,
+            "context_priority": "high",
+        }
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert any(
+        message.get("content") == critical_content
+        for message in messages
+    )
+
+def test_hard_collapse_preserves_high_priority_tool_group():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Ordinary file contents.",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": (
+                "Critical repository state. "
+                + "critical " * 300
+            ),
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assistant_index = next(
+        i
+        for i, message in enumerate(messages)
+        if {
+            tool_call.get("id")
+            for tool_call in message.get("tool_calls", [])
+        }
+        == {"call-1", "call-2"}
+    )
+
+    assert messages[assistant_index + 1]["tool_call_id"] == "call-1"
+    assert messages[assistant_index + 2]["tool_call_id"] == "call-2"
+
+def test_tool_snip_preserves_high_priority_tool_output():
+    ctx = ContextManager(
+        max_tokens=4000,
+        keep_recent_messages=4,
+    )
+
+    tool_output = "important line\n" * 500
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": tool_output,
+            "context_priority": "high",
+        },
+    ]
+
+    assert ctx.maybe_compress(messages, None) is False
+
+    assert messages[1]["content"] == tool_output
+
+def test_context_metrics_records_high_priority_messages_after_compression():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": "Never modify production credentials.",
+            "context_priority": "high",
+        }
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert ctx.last_metrics.high_priority_messages == 1
+
+def test_context_metrics_records_priority_preserved_messages():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Ordinary file contents.",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert ctx.last_metrics.high_priority_messages == 1
+    assert ctx.last_metrics.priority_preserved_messages == 3
+
+def test_tool_snip_preserves_entire_high_priority_tool_group():
+    ctx = ContextManager(
+        max_tokens=4000,
+        keep_recent_messages=4,
+    )
+
+    sibling_output = "ordinary sibling line\n" * 500
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": sibling_output,
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    ctx.maybe_compress(messages, None)
+
+    assert messages[1]["content"] == sibling_output
