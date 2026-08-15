@@ -1720,3 +1720,758 @@ def test_tool_snip_preserves_entire_high_priority_tool_group():
     ctx.maybe_compress(messages, None)
 
     assert messages[1]["content"] == sibling_output
+
+def test_eval_case_stores_name_and_prompt():
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+    )
+
+    assert case.name == "simple-answer"
+    assert case.prompt == "Reply with exactly: done"
+
+def test_eval_result_stores_case_outcome():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="simple-answer",
+        success=True,
+        output="done",
+    )
+
+    assert result.case_name == "simple-answer"
+    assert result.success is True
+    assert result.output == "done"
+
+def test_eval_result_stores_duration():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="simple-answer",
+        success=True,
+        output="done",
+        duration_ms=12.5,
+    )
+
+    assert result.duration_ms == 12.5
+
+def test_eval_case_stores_expected_output():
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    assert case.expected_output == "done"
+
+
+def test_eval_case_matches_expected_output():
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    assert case.matches("done") is True
+    assert case.matches("not done") is False
+
+def test_eval_case_matches_requires_expected_output():
+    import pytest
+
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="unscored-case",
+        prompt="Do the task",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="expected_output is required for exact matching",
+    ):
+        case.matches("done")
+
+def test_eval_runner_runs_case_and_records_success():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            assert prompt == "Reply with exactly: done"
+            return "done"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.case_name == "simple-answer"
+    assert result.success is True
+    assert result.output == "done"
+    assert result.duration_ms >= 0
+
+def test_eval_runner_records_failed_case():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            return "wrong answer"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.case_name == "simple-answer"
+    assert result.success is False
+    assert result.output == "wrong answer"
+    assert result.duration_ms >= 0
+
+def test_eval_runner_runs_multiple_cases_in_order():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            return {
+                "first prompt": "first",
+                "second prompt": "wrong",
+            }[prompt]
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    cases = [
+        EvalCase(
+            name="first",
+            prompt="first prompt",
+            expected_output="first",
+        ),
+        EvalCase(
+            name="second",
+            prompt="second prompt",
+            expected_output="second",
+        ),
+    ]
+
+    report = runner.run(cases)
+    results = report.results
+
+    assert [result.case_name for result in results] == [
+        "first",
+        "second",
+    ]
+    assert [result.success for result in results] == [
+        True,
+        False,
+    ]
+
+def test_eval_report_computes_success_rate():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="ok",
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=False,
+                output="wrong",
+            ),
+            EvalResult(
+                case_name="case-3",
+                success=True,
+                output="ok",
+            ),
+        ]
+    )
+
+    assert report.success_rate == 2 / 3
+
+def test_eval_report_computes_average_duration():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="ok",
+                duration_ms=10.0,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=False,
+                output="wrong",
+                duration_ms=30.0,
+            ),
+        ]
+    )
+
+    assert report.avg_duration_ms == 20.0
+
+def test_eval_report_handles_empty_results():
+    from corecoder.eval import EvalReport
+
+    report = EvalReport(results=[])
+
+    assert report.success_rate == 0.0
+    assert report.avg_duration_ms == 0.0
+
+def test_eval_runner_returns_report():
+    from corecoder.eval import EvalCase, EvalReport, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            return "done"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    cases = [
+        EvalCase(
+            name="simple-answer",
+            prompt="Reply with exactly: done",
+            expected_output="done",
+        )
+    ]
+
+    report = runner.run(cases)
+
+    assert isinstance(report, EvalReport)
+    assert len(report.results) == 1
+    assert report.results[0].success is True
+    assert report.success_rate == 1.0
+
+def test_eval_result_stores_llm_rounds():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="simple-answer",
+        success=True,
+        output="done",
+        llm_rounds=3,
+    )
+
+    assert result.llm_rounds == 3
+
+
+def test_eval_runner_records_llm_rounds_from_trace():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.llm_rounds == 1
+
+
+def test_eval_runner_llm_rounds_do_not_accumulate_across_cases():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    first = runner.run_case(
+        EvalCase(
+            name="first",
+            prompt="first prompt",
+            expected_output="done",
+        )
+    )
+    second = runner.run_case(
+        EvalCase(
+            name="second",
+            prompt="second prompt",
+            expected_output="done",
+        )
+    )
+
+    assert first.llm_rounds == 1
+    assert second.llm_rounds == 1
+
+def test_eval_result_stores_tool_calls():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="tool-case",
+        success=True,
+        output="done",
+        tool_calls=2,
+    )
+
+    assert result.tool_calls == 2
+
+def test_eval_runner_records_tool_calls_from_trace():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tools.base import Tool
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "tool result"
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                tool_call = SimpleNamespace(
+                    name="example",
+                    id="call-1",
+                    arguments={},
+                )
+                return SimpleNamespace(
+                    tool_calls=[tool_call],
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    content="",
+                )
+
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    case = EvalCase(
+        name="tool-case",
+        prompt="Use the example tool",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.success is True
+    assert result.llm_rounds == 2
+    assert result.tool_calls == 1
+
+def test_eval_runner_tool_calls_do_not_accumulate_across_cases():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tools.base import Tool
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "tool result"
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+
+            if self.calls % 2 == 1:
+                tool_call = SimpleNamespace(
+                    name="example",
+                    id=f"call-{self.calls}",
+                    arguments={},
+                )
+                return SimpleNamespace(
+                    tool_calls=[tool_call],
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    content="",
+                )
+
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    first = runner.run_case(
+        EvalCase(
+            name="first",
+            prompt="first prompt",
+            expected_output="done",
+        )
+    )
+    second = runner.run_case(
+        EvalCase(
+            name="second",
+            prompt="second prompt",
+            expected_output="done",
+        )
+    )
+
+    assert first.tool_calls == 1
+    assert second.tool_calls == 1
+
+def test_eval_result_stores_context_tokens_saved():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="context-case",
+        success=True,
+        output="done",
+        context_tokens_saved=120,
+    )
+
+    assert result.context_tokens_saved == 120
+
+def test_eval_runner_records_context_tokens_saved_from_trace():
+    import time
+
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tracing import InMemoryTracer, TraceEvent
+
+    tracer = InMemoryTracer()
+
+    class _FakeAgent:
+        def __init__(self):
+            self.tracer = tracer
+
+        def chat(self, prompt):
+            tracer.emit(
+                TraceEvent(
+                    name="context.managed",
+                    timestamp=time.time(),
+                    attributes={
+                        "tokens_saved": 40,
+                    },
+                )
+            )
+            tracer.emit(
+                TraceEvent(
+                    name="context.managed",
+                    timestamp=time.time(),
+                    attributes={
+                        "tokens_saved": 80,
+                    },
+                )
+            )
+            return "done"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    case = EvalCase(
+        name="context-case",
+        prompt="Do the task",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.context_tokens_saved == 120
+
+def test_eval_report_computes_average_context_tokens_saved():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                context_tokens_saved=100,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=True,
+                output="done",
+                context_tokens_saved=300,
+            ),
+        ]
+    )
+
+    assert report.avg_context_tokens_saved == 200.0
+
+def test_eval_report_computes_average_llm_rounds():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                llm_rounds=1,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=True,
+                output="done",
+                llm_rounds=3,
+            ),
+        ]
+    )
+
+    assert report.avg_llm_rounds == 2.0
+
+def test_eval_report_computes_average_tool_calls():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                tool_calls=1,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=True,
+                output="done",
+                tool_calls=3,
+            ),
+        ]
+    )
+
+    assert report.avg_tool_calls == 2.0
+
+def test_eval_runner_records_agent_exception():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FailingAgent:
+        def chat(self, prompt):
+            raise RuntimeError("agent failed")
+
+    runner = EvalRunner(agent=_FailingAgent())
+
+    case = EvalCase(
+        name="failing-case",
+        prompt="Do the task",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.case_name == "failing-case"
+    assert result.success is False
+    assert result.output == ""
+    assert result.error_type == "RuntimeError"
+    assert result.duration_ms >= 0
+
+def test_eval_runner_continues_after_failed_case():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _Agent:
+        def chat(self, prompt):
+            if prompt == "fail":
+                raise RuntimeError("agent failed")
+            return "done"
+
+    runner = EvalRunner(agent=_Agent())
+
+    report = runner.run(
+        [
+            EvalCase(
+                name="failing-case",
+                prompt="fail",
+                expected_output="done",
+            ),
+            EvalCase(
+                name="passing-case",
+                prompt="pass",
+                expected_output="done",
+            ),
+        ]
+    )
+
+    assert len(report.results) == 2
+
+    assert report.results[0].success is False
+    assert report.results[0].error_type == "RuntimeError"
+
+    assert report.results[1].success is True
+    assert report.results[1].error_type is None
+
+    assert report.success_rate == 0.5
+
+def test_eval_report_serializes_to_dict():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                duration_ms=10.0,
+                llm_rounds=2,
+                tool_calls=1,
+                context_tokens_saved=50,
+            )
+        ]
+    )
+
+    data = report.to_dict()
+
+    assert data["success_rate"] == 1.0
+    assert data["avg_duration_ms"] == 10.0
+    assert data["avg_llm_rounds"] == 2.0
+    assert data["avg_tool_calls"] == 1.0
+    assert data["avg_context_tokens_saved"] == 50.0
+
+    assert data["results"][0]["case_name"] == "case-1"
+    assert data["results"][0]["success"] is True
+
+def test_eval_report_serializes_to_json():
+    import json
+
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                duration_ms=10.0,
+                llm_rounds=2,
+                tool_calls=1,
+                context_tokens_saved=50,
+            )
+        ]
+    )
+
+    payload = report.to_json()
+    data = json.loads(payload)
+
+    assert data["success_rate"] == 1.0
+    assert data["results"][0]["case_name"] == "case-1"
+    assert data["results"][0]["output"] == "done"
+
+def test_eval_report_saves_json_file(tmp_path):
+    import json
+
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+            )
+        ]
+    )
+
+    path = tmp_path / "report.json"
+
+    report.save_json(path)
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    assert data["success_rate"] == 1.0
+    assert data["results"][0]["case_name"] == "case-1"
