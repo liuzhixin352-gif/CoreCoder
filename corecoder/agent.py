@@ -11,7 +11,10 @@ which means it's done working and ready to report back.
 
 import asyncio
 import inspect
+import time
 
+from uuid import uuid4
+from .tracing import TraceEvent, Tracer
 from .tool_runtime import run_tool_calls
 from .llm import LLM
 from .tools import ALL_TOOLS
@@ -23,12 +26,13 @@ from .context import ContextManager
 
 class Agent:
     def __init__(
-        self,
-        llm: LLM,
-        tools: list[Tool] | None = None,
-        max_context_tokens: int = 128_000,
-        max_rounds: int = 50,
-        tool_timeout: float | None = None,
+    self,
+    llm: LLM,
+    tools: list[Tool] | None = None,
+    max_context_tokens: int = 128_000,
+    max_rounds: int = 50,
+    tool_timeout: float | None = None,
+    tracer: Tracer | None = None,
     ):
         self.llm = llm
         self.tools = tools if tools is not None else ALL_TOOLS
@@ -37,6 +41,8 @@ class Agent:
         self.context = ContextManager(max_tokens=max_context_tokens)
         self.max_rounds = max_rounds
         self.tool_timeout = tool_timeout
+        self.tracer = tracer
+        self._active_run_id: str | None = None
         self._system = system_prompt(self.tools)
 
         # wire up sub-agent capability
@@ -52,19 +58,108 @@ class Agent:
 
     def chat(self, user_input: str, on_token=None, on_tool=None) -> str:
         """Process one user message. May involve multiple LLM/tool rounds."""
+        self._active_run_id = uuid4().hex
+        agent_started_at = time.perf_counter()
+
+        if self.tracer is not None:
+            self._emit_trace(
+                TraceEvent(
+                    name="agent.started",
+                    timestamp=time.time(),
+                )
+            )
         self.messages.append({"role": "user", "content": user_input})
         self.context.maybe_compress(self.messages, self.llm)
 
-        for _ in range(self.max_rounds):
-            resp = self.llm.chat(
-                messages=self._full_messages(),
-                tools=self._tool_schemas(),
-                on_token=on_token,
-            )
+        for round_number in range(1, self.max_rounds + 1):
+            llm_started_at = time.perf_counter()
+
+            if self.tracer is not None:
+                self._emit_trace(
+                    TraceEvent(
+                        name="llm.started",
+                        timestamp=time.time(),
+                        attributes={
+                            "round": round_number,
+                        },
+                    )
+                )
+
+            try:
+                resp = self.llm.chat(
+                    messages=self._full_messages(),
+                    tools=self._tool_schemas(),
+                    on_token=on_token,
+                )
+            except Exception as e:
+                if self.tracer is not None:
+                    self._emit_trace(
+                        TraceEvent(
+                            name="llm.failed",
+                            timestamp=time.time(),
+                            attributes={
+                                "round": round_number,
+                                "error_type": type(e).__name__,
+                                "duration_ms": (
+                                    time.perf_counter() - llm_started_at
+                                )
+                                * 1000,
+                            },
+                        )
+                    )
+
+                    self._emit_trace(
+                                    TraceEvent(
+                                        name="agent.failed",
+                                        timestamp=time.time(),
+                                        attributes={
+                                         "error_type": type(e).__name__,
+                                        "llm_rounds": round_number,
+                                         "duration_ms": (
+                                        time.perf_counter() - agent_started_at
+                                         )
+                                         * 1000,
+                                         },
+                                                    )
+                                                )
+                self._active_run_id = None
+                raise
+
+            if self.tracer is not None:
+                self._emit_trace(
+                    TraceEvent(
+                        name="llm.completed",
+                        timestamp=time.time(),
+                        attributes={
+                            "round": round_number,
+                            "duration_ms": (
+                                time.perf_counter() - llm_started_at
+                            )
+                            * 1000,
+                        },
+                    )
+                )
 
             # no tool calls -> LLM is done, return text
             if not resp.tool_calls:
                 self.messages.append(resp.message)
+
+                if self.tracer is not None:
+                    self._emit_trace(
+                        TraceEvent(
+                            name="agent.completed",
+                            timestamp=time.time(),
+                            attributes={
+                                "duration_ms": (
+                                    time.perf_counter() - agent_started_at
+                                )
+                                * 1000,
+                                "llm_rounds": round_number,
+                            },
+                        )
+                    )
+
+                self._active_run_id = None
                 return resp.content
 
             # tool calls -> execute (parallel when multiple, like Claude Code's
@@ -87,11 +182,27 @@ class Agent:
                 # Ctrl+C mid-execution would leave the assistant tool_calls
                 # message without replies, poisoning the next request; backfill
                 self._answer_pending_tool_calls(resp.tool_calls)
+                self._active_run_id = None
                 raise
 
             # compress if tool outputs are big
             self.context.maybe_compress(self.messages, self.llm)
 
+        if self.tracer is not None:
+            self._emit_trace(
+                TraceEvent(
+                    name="agent.completed",
+                    timestamp=time.time(),
+                    attributes={
+                        "duration_ms": (
+                            time.perf_counter() - agent_started_at
+                        )
+                        * 1000,
+                        "llm_rounds": self.max_rounds,
+                    },
+                )
+            )
+        self._active_run_id = None
         return "(reached maximum tool-call rounds)"
 
     def _exec_tool(self, tc) -> str:
@@ -112,6 +223,7 @@ class Agent:
 
     async def _exec_tool_async(self, tc) -> str:
         """Execute a single tool call asynchronously."""
+        started_at = time.perf_counter()
         tool = self._tool_by_name.get(tc.name)
         if tool is None:
             return f"Error: unknown tool '{tc.name}'"
@@ -121,21 +233,85 @@ class Agent:
         except TypeError as e:
             return f"Error: bad arguments for {tc.name}: {e}"
 
+        if self.tracer is not None:
+            self._emit_trace(
+                TraceEvent(
+                    name="tool.started",
+                    timestamp=time.time(),
+                    attributes={
+                        "tool_name": tc.name,
+                        "tool_call_id": tc.id,
+                    },
+                )
+            )
+
         try:
             if self.tool_timeout is None:
-                return await tool.aexecute(**tc.arguments)
-
-            return await asyncio.wait_for(
-                tool.aexecute(**tc.arguments),
-                timeout=self.tool_timeout,
-            )
+                result = await tool.aexecute(**tc.arguments)
+            else:
+                result = await asyncio.wait_for(
+                    tool.aexecute(**tc.arguments),
+                    timeout=self.tool_timeout,
+                )
         except asyncio.TimeoutError:
+            if self.tracer is not None:
+                self._emit_trace(
+                    TraceEvent(
+                        name="tool.timed_out",
+                        timestamp=time.time(),
+                        attributes={
+                            "tool_name": tc.name,
+                            "tool_call_id": tc.id,
+                            "timeout_seconds": self.tool_timeout,
+                            "duration_ms": (
+                                time.perf_counter() - started_at
+                            )
+                            * 1000,
+                        },
+                    )
+                )
+
             return (
                 f"Error executing {tc.name}: "
                 f"timed out after {self.tool_timeout} seconds"
             )
         except Exception as e:
+            if self.tracer is not None:
+                self._emit_trace(
+                    TraceEvent(
+                        name="tool.failed",
+                        timestamp=time.time(),
+                        attributes={
+                            "tool_name": tc.name,
+                            "tool_call_id": tc.id,
+                            "error_type": type(e).__name__,
+                            "duration_ms": (
+                                time.perf_counter() - started_at
+                            )
+                            * 1000,
+                        },
+                    )
+                )
+
             return f"Error executing {tc.name}: {e}"
+
+        if self.tracer is not None:
+            self._emit_trace(
+                TraceEvent(
+                    name="tool.completed",
+                    timestamp=time.time(),
+                    attributes={
+                        "tool_name": tc.name,
+                        "tool_call_id": tc.id,
+                        "duration_ms": (
+                            time.perf_counter() - started_at
+                        )
+                        * 1000,
+                    },
+                )
+            )
+
+        return result
 
     def _exec_tools_parallel(self, tool_calls, on_tool=None) -> list[str]:
         """Run tool calls concurrently through the async runtime.
@@ -175,3 +351,23 @@ class Agent:
     def reset(self):
         """Clear conversation history."""
         self.messages.clear()
+
+    def _emit_trace(self, event: TraceEvent) -> None:
+        """Emit a trace event without affecting agent execution."""
+        if self.tracer is None:
+            return
+
+        if self._active_run_id is not None:
+            event = TraceEvent(
+                name=event.name,
+                timestamp=event.timestamp,
+                attributes={
+                    **event.attributes,
+                    "run_id": self._active_run_id,
+                },
+            )
+
+        try:
+            self.tracer.emit(event)
+        except Exception:
+            pass

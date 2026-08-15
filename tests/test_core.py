@@ -447,3 +447,568 @@ def test_interrupt_backfills_missing_tool_replies():
     ids = [m["tool_call_id"] for m in replies]
     assert sorted(ids) == ["a", "b"]
     assert ids.count("a") == 1  # the already-answered call wasn't duplicated
+
+def test_agent_accepts_tracer():
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.tracer is tracer
+
+def test_agent_emits_tool_started_trace():
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            assert tracer.events[0].name == "tool.started"
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+
+    class _TC:
+        name = "example"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+    event = tracer.events[0]
+
+    assert event.name == "tool.started"
+    assert event.timestamp > 0
+    assert event.attributes == {
+        "tool_name": "example",
+        "tool_call_id": "call-1",
+    }
+
+def test_agent_emits_tool_completed_trace_with_duration():
+    import asyncio
+
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            await asyncio.sleep(0)
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+
+    class _TC:
+        name = "example"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.started",
+        "tool.completed",
+    ]
+
+    completed = tracer.events[1]
+
+    assert completed.timestamp > 0
+    assert completed.attributes["tool_name"] == "example"
+    assert completed.attributes["tool_call_id"] == "call-1"
+    assert completed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_tool_failed_trace():
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _FailingTool(Tool):
+        name = "failing"
+        description = "failing test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            raise RuntimeError("boom")
+
+        async def aexecute(self):
+            raise RuntimeError("boom")
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_FailingTool()],
+        tracer=tracer,
+    )
+
+    class _TC:
+        name = "failing"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error executing failing: boom",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.started",
+        "tool.failed",
+    ]
+
+    failed = tracer.events[1]
+
+    assert failed.attributes["tool_name"] == "failing"
+    assert failed.attributes["tool_call_id"] == "call-1"
+    assert failed.attributes["error_type"] == "RuntimeError"
+    assert failed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_tool_timed_out_trace():
+    import asyncio
+
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _SlowTool(Tool):
+        name = "slow"
+        description = "slow test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-result"
+
+        async def aexecute(self):
+            await asyncio.sleep(0.2)
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowTool()],
+        tracer=tracer,
+        tool_timeout=0.05,
+    )
+
+    class _TC:
+        name = "slow"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error executing slow: timed out after 0.05 seconds",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.started",
+        "tool.timed_out",
+    ]
+
+    timed_out = tracer.events[1]
+
+    assert timed_out.attributes["tool_name"] == "slow"
+    assert timed_out.attributes["tool_call_id"] == "call-1"
+    assert timed_out.attributes["timeout_seconds"] == 0.05
+    assert timed_out.attributes["duration_ms"] >= 0
+
+def test_agent_emits_llm_started_and_completed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    llm_events = [
+        event
+        for event in tracer.events
+        if event.name.startswith("llm.")
+    ]
+
+    assert [event.name for event in llm_events] == [
+        "llm.started",
+        "llm.completed",
+    ]
+
+    started = llm_events[0]
+    completed = llm_events[1]
+
+    assert started.attributes["round"] == 1
+    assert completed.attributes["round"] == 1
+    assert completed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_llm_failed_trace():
+    import pytest
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FailingLLM:
+        def chat(self, **kwargs):
+            raise RuntimeError("boom")
+
+    agent = Agent(
+        llm=_FailingLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        agent.chat("hello")
+
+    llm_events = [
+        event
+        for event in tracer.events
+        if event.name.startswith("llm.")
+    ]
+
+    assert [event.name for event in llm_events] == [
+        "llm.started",
+        "llm.failed",
+    ]
+
+    failed = llm_events[1]
+
+    assert failed.attributes["round"] == 1
+    assert failed.attributes["error_type"] == "RuntimeError"
+    assert failed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_started_and_completed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    assert [event.name for event in tracer.events] == [
+        "agent.started",
+        "llm.started",
+        "llm.completed",
+        "agent.completed",
+    ]
+
+    started = tracer.events[0]
+    completed = tracer.events[-1]
+
+    assert "run_id" in started.attributes
+    assert completed.attributes["run_id"] == started.attributes["run_id"]
+    assert completed.attributes["duration_ms"] >= 0
+    assert completed.attributes["llm_rounds"] == 1
+
+def test_agent_emits_completed_trace_when_max_rounds_reached():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            tool_call = SimpleNamespace(
+                name="missing_tool",
+                id="call-1",
+                arguments={},
+            )
+            return SimpleNamespace(
+                tool_calls=[tool_call],
+                message={
+                    "role": "assistant",
+                    "content": "",
+                },
+                content="",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+        max_rounds=2,
+    )
+
+    assert agent.chat("hello") == (
+        "(reached maximum tool-call rounds)"
+    )
+
+    assert tracer.events[-1].name == "agent.completed"
+    assert tracer.events[-1].attributes["llm_rounds"] == 2
+    assert tracer.events[-1].attributes["duration_ms"] >= 0
+
+def test_agent_emits_failed_trace_when_llm_fails():
+    import pytest
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FailingLLM:
+        def chat(self, **kwargs):
+            raise RuntimeError("boom")
+
+    agent = Agent(
+        llm=_FailingLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        agent.chat("hello")
+
+    assert [event.name for event in tracer.events] == [
+        "agent.started",
+        "llm.started",
+        "llm.failed",
+        "agent.failed",
+    ]
+
+    failed = tracer.events[-1]
+
+    assert failed.attributes["error_type"] == "RuntimeError"
+    assert failed.attributes["llm_rounds"] == 1
+    assert failed.attributes["duration_ms"] >= 0
+
+def test_tracer_failure_does_not_break_agent():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import TraceEvent, Tracer
+
+    class _FailingTracer(Tracer):
+        def emit(self, event: TraceEvent) -> None:
+            raise RuntimeError("tracer broke")
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=_FailingTracer(),
+    )
+
+    assert agent.chat("hello") == "done"
+
+def test_tracer_failure_does_not_break_tool_execution():
+    from corecoder.tracing import TraceEvent, Tracer
+    from corecoder.tools.base import Tool
+
+    class _FailingTracer(Tracer):
+        def emit(self, event: TraceEvent) -> None:
+            raise RuntimeError("tracer broke")
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_Tool()],
+        tracer=_FailingTracer(),
+    )
+
+    class _TC:
+        name = "example"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+def test_agent_trace_events_share_run_id_per_chat():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    agent.chat("first")
+
+    first_run_ids = {
+        event.attributes["run_id"]
+        for event in tracer.events
+    }
+
+    assert len(first_run_ids) == 1
+
+    first_run_id = next(iter(first_run_ids))
+
+    tracer.events.clear()
+
+    agent.chat("second")
+
+    second_run_ids = {
+        event.attributes["run_id"]
+        for event in tracer.events
+    }
+
+    assert len(second_run_ids) == 1
+    assert next(iter(second_run_ids)) != first_run_id
+
+def test_agent_clears_active_run_id_when_tool_execution_is_interrupted():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from corecoder.tools.base import Tool
+
+    class _InterruptingTool(Tool):
+        name = "interrupting"
+        description = "interrupting tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            raise KeyboardInterrupt
+
+        async def aexecute(self):
+            raise KeyboardInterrupt
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[
+                    SimpleNamespace(
+                        name="interrupting",
+                        id="call-1",
+                        arguments={},
+                    )
+                ],
+                message={
+                    "role": "assistant",
+                    "content": "",
+                },
+                content="",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[_InterruptingTool()],
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        agent.chat("hello")
+
+    assert agent._active_run_id is None
