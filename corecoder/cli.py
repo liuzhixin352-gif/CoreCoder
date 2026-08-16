@@ -72,7 +72,10 @@ from .issue_orchestration import (
     run_issue_workflow,
     save_workflow_checkpoint,
 )
-
+from .permissions import (
+    ToolApprovalRequest,
+    ToolPermissionPolicy,
+)
 
 console = Console()
 _DRY_RUN_TOOL_NAMES = frozenset(
@@ -167,6 +170,23 @@ def _parse_args():
         )
 
     return args
+
+def _request_tool_approval(
+    request: ToolApprovalRequest,
+) -> bool:
+    console.print()
+    console.print("[bold]Tool approval required[/]")
+    console.print(f"  Tool: [yellow]{request.tool_name}[/yellow]")
+    console.print(
+        f"  Permission: [yellow]{request.permission.value}[/yellow]"
+    )
+    console.print(f"  Arguments: {request.arguments}")
+
+    response = pt_prompt(
+        "Approve tool execution? [approve/reject] > "
+    ).strip().lower()
+
+    return response == "approve"
 
 def _request_commit_approval(
     summary: PostRepairSummary,
@@ -421,6 +441,8 @@ def main():
         llm=llm,
         tools=agent_tools,
         max_context_tokens=config.max_context_tokens,
+        permission_policy=ToolPermissionPolicy(),
+        request_tool_approval=_request_tool_approval,
     )
 
     # resume saved session

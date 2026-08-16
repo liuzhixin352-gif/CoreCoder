@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import threading
+from ..permissions import ToolPermission
 from .base import Tool
 
 # Track cwd across commands (Claude Code does this too). Thread-local, so that
@@ -38,6 +39,7 @@ _DANGEROUS_PATTERNS = [
 
 class BashTool(Tool):
     name = "bash"
+    permission = ToolPermission.EXECUTE
     description = (
         "Execute a shell command. Returns stdout, stderr, and exit code. "
         "Use this for running tests, installing packages, git operations, etc."

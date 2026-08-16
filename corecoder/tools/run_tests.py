@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 
+from ..permissions import ToolPermission
 from .base import Tool
 
 _PYTEST_COUNT_PATTERNS = {
@@ -82,6 +83,7 @@ class RunTestsTool(Tool):
     """Run pytest and return a structured result."""
 
     name = "run_tests"
+    permission = ToolPermission.EXECUTE
 
     description = (
         "Run pytest for a file or directory and return a structured result. "

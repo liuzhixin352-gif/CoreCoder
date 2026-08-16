@@ -2,10 +2,12 @@
 
 from pathlib import Path
 from .base import Tool
+from ..permissions import ToolPermission
 
 
 class ReadFileTool(Tool):
     name = "read_file"
+    permission = ToolPermission.READ
     description = (
         "Read a file's contents with line numbers. "
         "Always read a file before editing it."

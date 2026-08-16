@@ -1,7 +1,7 @@
 """Base class for all tools."""
 import asyncio
 from abc import ABC, abstractmethod
-
+from ..permissions import ToolPermission
 
 class Tool(ABC):
     """Minimal tool interface. Subclass this to add new capabilities."""
@@ -9,6 +9,7 @@ class Tool(ABC):
     name: str
     description: str
     parameters: dict  # JSON Schema for the function args
+    permission: ToolPermission = ToolPermission.UNKNOWN
 
     @abstractmethod
     def execute(self, **kwargs) -> str:

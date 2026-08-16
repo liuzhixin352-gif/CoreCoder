@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from corecoder.permissions import ToolPermission
+
 from .base import Tool
 
 
@@ -100,6 +102,7 @@ class RepoMapTool(Tool):
     """Build a structured map of Python files in a repository."""
 
     name = "repo_map"
+    permission = ToolPermission.READ
 
     description = (
         "Scan a repository and return a structured map of Python files, "

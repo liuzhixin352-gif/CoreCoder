@@ -470,6 +470,228 @@ def test_agent_accepts_tracer():
     )
 
     assert agent.tracer is tracer
+def test_agent_emits_permission_trace_before_allowed_tool_execution():
+    from corecoder.permissions import (
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _ReadTool(Tool):
+        name = "read_test"
+        description = "test read tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        permission = ToolPermission.READ
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_ReadTool()],
+        tracer=tracer,
+        permission_policy=ToolPermissionPolicy(),
+    )
+
+    class _TC:
+        name = "read_test"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.permission",
+        "tool.started",
+        "tool.completed",
+    ]
+
+    permission = tracer.events[0]
+
+    assert permission.timestamp > 0
+    assert permission.attributes == {
+        "tool_name": "read_test",
+        "tool_call_id": "call-1",
+        "permission": "read",
+        "decision": "allow",
+        "approval": None,
+    }
+
+def test_agent_traces_rejected_approval_without_starting_tool():
+    from corecoder.permissions import (
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+        async def aexecute(self):
+            self.executed = True
+            return "done"
+
+    def _reject(request):
+        return False
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        tracer=tracer,
+        permission_policy=ToolPermissionPolicy(),
+        request_tool_approval=_reject,
+    )
+
+    class _TC:
+        name = "write_test"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error: approval rejected for tool 'write_test'",
+    ]
+
+    assert tool.executed is False
+
+    assert [event.name for event in tracer.events] == [
+        "tool.permission",
+    ]
+
+    permission = tracer.events[0]
+
+    assert permission.attributes == {
+        "tool_name": "write_test",
+        "tool_call_id": "call-1",
+        "permission": "write",
+        "decision": "ask",
+        "approval": "rejected",
+    }
+
+def test_agent_traces_denied_permission_without_starting_tool():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _ExecuteTool(Tool):
+        name = "execute_test"
+        description = "test execute tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        permission = ToolPermission.EXECUTE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+        async def aexecute(self):
+            self.executed = True
+            return "done"
+
+    class _DenyPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.DENY
+
+    tool = _ExecuteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        tracer=tracer,
+        permission_policy=_DenyPolicy(),
+    )
+
+    class _TC:
+        name = "execute_test"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error: permission denied for tool 'execute_test'",
+    ]
+
+    assert tool.executed is False
+
+    assert [event.name for event in tracer.events] == [
+        "tool.permission",
+    ]
+
+    permission = tracer.events[0]
+
+    assert permission.attributes == {
+        "tool_name": "execute_test",
+        "tool_call_id": "call-1",
+        "permission": "execute",
+        "decision": "deny",
+        "approval": None,
+    }
+
+def test_all_registered_tools_have_expected_permissions():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools import ALL_TOOLS
+
+    expected = {
+        "bash": ToolPermission.EXECUTE,
+        "read_file": ToolPermission.READ,
+        "write_file": ToolPermission.WRITE,
+        "edit_file": ToolPermission.WRITE,
+        "glob": ToolPermission.READ,
+        "grep": ToolPermission.READ,
+        "agent": ToolPermission.EXECUTE,
+        "run_tests": ToolPermission.EXECUTE,
+        "repo_map": ToolPermission.READ,
+        "parse_issue": ToolPermission.READ,
+        "fetch_issue": ToolPermission.READ,
+    }
+
+    actual = {
+        tool.name: tool.permission
+        for tool in ALL_TOOLS
+    }
+
+    assert actual == expected
+    assert ToolPermission.UNKNOWN not in actual.values()
+
 
 def test_agent_emits_tool_started_trace():
     from corecoder.tracing import InMemoryTracer
@@ -2475,3 +2697,644 @@ def test_eval_report_saves_json_file(tmp_path):
 
     assert data["success_rate"] == 1.0
     assert data["results"][0]["case_name"] == "case-1"
+
+def test_tool_permission_policy_allows_read_only_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.READ,
+    )
+
+    assert decision is PermissionDecision.ALLOW
+
+def test_tool_permission_policy_requires_approval_for_write_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.WRITE,
+    )
+
+    assert decision is PermissionDecision.ASK
+
+def test_tool_permission_policy_requires_approval_for_execute_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.EXECUTE,
+    )
+
+    assert decision is PermissionDecision.ASK
+
+def test_tool_permission_policy_requires_approval_for_unknown_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.UNKNOWN,
+    )
+
+    assert decision is PermissionDecision.ASK
+
+def test_read_file_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.read import ReadFileTool
+
+    tool = ReadFileTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_tool_defaults_to_unknown_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.base import Tool
+
+    class _UnclassifiedTool(Tool):
+        name = "unclassified"
+        description = "unclassified tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "done"
+
+    tool = _UnclassifiedTool()
+
+    assert tool.permission is ToolPermission.UNKNOWN
+
+def test_mcp_tool_adapter_defaults_to_unknown_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.mcp import MCPToolAdapter
+
+    tool = MCPToolAdapter(
+        server=object(),
+        name="dynamic_tool",
+        description="dynamic MCP tool",
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+    )
+
+    assert tool.permission is ToolPermission.UNKNOWN
+
+def test_agent_accepts_permission_policy():
+    from corecoder.permissions import ToolPermissionPolicy
+
+    policy = ToolPermissionPolicy()
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[],
+        permission_policy=policy,
+    )
+
+    assert agent.permission_policy is policy
+
+def test_agent_evaluates_permission_policy_before_tool_execution():
+    import asyncio
+
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _ReadTool(Tool):
+        name = "read_test"
+        description = "test read tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.READ
+
+        def execute(self):
+            return "done"
+
+    class _RecordingPolicy(ToolPermissionPolicy):
+        def __init__(self):
+            self.permissions = []
+
+        def evaluate(self, permission):
+            self.permissions.append(permission)
+            return PermissionDecision.ALLOW
+
+    class _TC:
+        name = "read_test"
+        id = "1"
+        arguments = {}
+
+    policy = _RecordingPolicy()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_ReadTool()],
+        permission_policy=policy,
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert result == "done"
+    assert policy.permissions == [ToolPermission.READ]
+
+def test_agent_does_not_execute_tool_when_permission_requires_approval():
+    import asyncio
+
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert tool.executed is False
+    assert result == "Error: approval required for tool 'write_test'"
+
+def test_agent_does_not_execute_tool_when_permission_is_denied():
+    import asyncio
+
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _ExecuteTool(Tool):
+        name = "execute_test"
+        description = "test execute tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.EXECUTE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _DenyPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.DENY
+
+    class _TC:
+        name = "execute_test"
+        id = "1"
+        arguments = {}
+
+    tool = _ExecuteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_DenyPolicy(),
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert tool.executed is False
+    assert result == "Error: permission denied for tool 'execute_test'"
+
+def test_agent_without_permission_policy_preserves_existing_tool_execution():
+    import asyncio
+
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert result == "done"
+    assert tool.executed is True
+
+def test_sync_tool_execution_respects_permission_policy():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert tool.executed is False
+    assert result == "Error: approval required for tool 'write_test'"
+
+def test_write_file_tool_declares_write_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.write import WriteFileTool
+
+    tool = WriteFileTool()
+
+    assert tool.permission is ToolPermission.WRITE
+
+def test_edit_file_tool_declares_write_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.edit import EditFileTool
+
+    tool = EditFileTool()
+
+    assert tool.permission is ToolPermission.WRITE
+
+def test_bash_tool_declares_execute_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.bash import BashTool
+
+    tool = BashTool()
+
+    assert tool.permission is ToolPermission.EXECUTE
+
+def test_run_tests_tool_declares_execute_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.run_tests import RunTestsTool
+
+    tool = RunTestsTool()
+
+    assert tool.permission is ToolPermission.EXECUTE
+
+def test_grep_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.grep import GrepTool
+
+    tool = GrepTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_glob_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.glob_tool import GlobTool
+
+    tool = GlobTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_repo_map_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.repo_map import RepoMapTool
+
+    tool = RepoMapTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_parse_issue_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.parse_issue import ParseIssueTool
+
+    tool = ParseIssueTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_fetch_issue_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.fetch_issue import FetchIssueTool
+
+    tool = FetchIssueTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_agent_tool_declares_execute_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.agent import AgentTool
+
+    tool = AgentTool()
+
+    assert tool.permission is ToolPermission.EXECUTE
+
+def test_agent_executes_ask_tool_when_approval_is_granted():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    approvals = []
+
+    def _approve(request):
+        approvals.append(request)
+        return True
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+        request_tool_approval=_approve,
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert result == "done"
+    assert tool.executed is True
+    assert len(approvals) == 1
+    assert approvals[0].tool_name == "write_test"
+    assert approvals[0].permission is ToolPermission.WRITE
+    assert approvals[0].arguments == {}
+
+def test_agent_does_not_execute_ask_tool_when_approval_is_rejected():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    approvals = []
+
+    def _reject(request):
+        approvals.append(request)
+        return False
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+        request_tool_approval=_reject,
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert tool.executed is False
+    assert result == "Error: approval rejected for tool 'write_test'"
+    assert len(approvals) == 1
+    assert approvals[0].tool_name == "write_test"
+    assert approvals[0].permission is ToolPermission.WRITE
+
+def test_agent_does_not_allow_approval_to_override_denied_permission():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _ExecuteTool(Tool):
+        name = "execute_test"
+        description = "test execute tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.EXECUTE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _DenyPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.DENY
+
+    class _TC:
+        name = "execute_test"
+        id = "1"
+        arguments = {}
+
+    approvals = []
+
+    def _approve(request):
+        approvals.append(request)
+        return True
+
+    tool = _ExecuteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_DenyPolicy(),
+        request_tool_approval=_approve,
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert tool.executed is False
+    assert approvals == []
+    assert result == "Error: permission denied for tool 'execute_test'"
+
+def test_agent_tool_inherits_parent_permission_context(
+    monkeypatch,
+):
+    from corecoder.permissions import ToolPermissionPolicy
+    from corecoder.tools.agent import AgentTool
+
+    captured = {}
+
+    class _FakeChildAgent:
+        def chat(self, task):
+            captured["task"] = task
+            return "child result"
+
+    def _fake_agent(**kwargs):
+        captured["agent_kwargs"] = kwargs
+        return _FakeChildAgent()
+
+    monkeypatch.setattr(
+        "corecoder.agent.Agent",
+        _fake_agent,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    def _approve(request):
+        return True
+
+    agent_tool = AgentTool()
+    parent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[agent_tool],
+        permission_policy=policy,
+        request_tool_approval=_approve,
+    )
+
+    result = agent_tool.execute("inspect the repository")
+
+    assert result == "[Sub-agent completed]\nchild result"
+    assert captured["task"] == "inspect the repository"
+    assert (
+        captured["agent_kwargs"]["permission_policy"]
+        is parent.permission_policy
+    )
+    assert (
+        captured["agent_kwargs"]["request_tool_approval"]
+        is parent.request_tool_approval
+    )

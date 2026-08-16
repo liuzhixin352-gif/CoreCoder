@@ -13,6 +13,7 @@ import asyncio
 import inspect
 import time
 
+from collections.abc import Callable
 from uuid import uuid4
 from .tracing import TraceEvent, Tracer
 from .tool_runtime import run_tool_calls
@@ -22,7 +23,11 @@ from .tools.base import Tool
 from .tools.agent import AgentTool
 from .prompt import system_prompt
 from .context import ContextManager
-
+from .permissions import (
+    PermissionDecision,
+    ToolApprovalRequest,
+    ToolPermissionPolicy,
+)
 
 class Agent:
     def __init__(
@@ -33,6 +38,10 @@ class Agent:
     max_rounds: int = 50,
     tool_timeout: float | None = None,
     tracer: Tracer | None = None,
+    permission_policy: ToolPermissionPolicy | None = None,
+    request_tool_approval: (
+        Callable[[ToolApprovalRequest], bool] | None
+    ) = None,
     ):
         self.llm = llm
         self.tools = tools if tools is not None else ALL_TOOLS
@@ -42,8 +51,11 @@ class Agent:
         self.max_rounds = max_rounds
         self.tool_timeout = tool_timeout
         self.tracer = tracer
+        self.permission_policy = permission_policy
+        self.request_tool_approval = request_tool_approval
         self._active_run_id: str | None = None
         self._system = system_prompt(self.tools)
+
 
         # wire up sub-agent capability
         for t in self.tools:
@@ -216,6 +228,61 @@ class Agent:
         self._active_run_id = None
         return "(reached maximum tool-call rounds)"
 
+    def _permission_error(
+        self,
+        tool: Tool,
+        tool_name: str,
+        arguments: dict,
+        tool_call_id: str,
+    ) -> str | None:
+        if self.permission_policy is None:
+            return None
+
+        decision = self.permission_policy.evaluate(tool.permission)
+
+        approval = None
+
+        if decision is PermissionDecision.ASK:
+            if self.request_tool_approval is None:
+                approval = "required"
+            else:
+                request = ToolApprovalRequest(
+                    tool_name=tool_name,
+                    permission=tool.permission,
+                    arguments=dict(arguments),
+                )
+
+                if self.request_tool_approval(request):
+                    approval = "approved"
+                else:
+                    approval = "rejected"
+
+        if self.tracer is not None:
+            self._emit_trace(
+                TraceEvent(
+                    name="tool.permission",
+                    timestamp=time.time(),
+                    attributes={
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "permission": tool.permission.value,
+                        "decision": decision.value,
+                        "approval": approval,
+                    },
+                )
+            )
+        if decision is PermissionDecision.ASK:
+            if approval == "required":
+                return f"Error: approval required for tool '{tool_name}'"
+
+            if approval == "rejected":
+                return f"Error: approval rejected for tool '{tool_name}'"
+
+        if decision is PermissionDecision.DENY:
+            return f"Error: permission denied for tool '{tool_name}'"
+
+        return None
+
     def _exec_tool(self, tc) -> str:
         """Execute a single tool call, returning the result string."""
         tool = self._tool_by_name.get(tc.name)
@@ -227,6 +294,14 @@ class Agent:
             inspect.signature(tool.execute).bind(**tc.arguments)
         except TypeError as e:
             return f"Error: bad arguments for {tc.name}: {e}"
+        permission_error = self._permission_error(
+            tool,
+            tc.name,
+            tc.arguments,
+            tc.id,
+        )
+        if permission_error is not None:
+            return permission_error
         try:
             return tool.execute(**tc.arguments)
         except Exception as e:
@@ -243,6 +318,14 @@ class Agent:
             inspect.signature(tool.execute).bind(**tc.arguments)
         except TypeError as e:
             return f"Error: bad arguments for {tc.name}: {e}"
+        permission_error = self._permission_error(
+            tool,
+            tc.name,
+            tc.arguments,
+            tc.id,
+        )
+        if permission_error is not None:
+            return permission_error
 
         if self.tracer is not None:
             self._emit_trace(
