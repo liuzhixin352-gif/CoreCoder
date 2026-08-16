@@ -8,11 +8,14 @@ its own context window.
 The sub-agent runs to completion and returns a text summary.
 """
 
+from corecoder.permissions import ToolPermission
+
 from .base import Tool
 
 
 class AgentTool(Tool):
     name = "agent"
+    permission = ToolPermission.EXECUTE
     description = (
         "Spawn a sub-agent to handle a complex sub-task independently. "
         "The sub-agent has its own context and tool access. Use this for: "
@@ -43,9 +46,11 @@ class AgentTool(Tool):
         parent = self._parent_agent
         sub = Agent(
             llm=parent.llm,
-            tools=[t for t in parent.tools if t.name != "agent"],  # no recursive agents
+            tools=[t for t in parent.tools if t.name != "agent"],
             max_context_tokens=parent.context.max_tokens,
             max_rounds=20,
+            permission_policy=parent.permission_policy,
+            request_tool_approval=parent.request_tool_approval,
         )
 
         try:

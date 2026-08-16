@@ -10,6 +10,7 @@ from corecoder.github_issue import (
     fetch_github_issue,
 )
 
+from corecoder.permissions import ToolPermission
 from .base import Tool
 
 
@@ -29,6 +30,7 @@ class FetchIssueTool(Tool):
     """Fetch a GitHub issue and return a structured repair task."""
 
     name = "fetch_issue"
+    permission = ToolPermission.READ
 
     description = (
         "Fetch a real GitHub Issue by its URL, or by repository and issue "

@@ -3123,6 +3123,64 @@ def test_main_preserves_normal_prompt_mode(monkeypatch):
 
     assert captured["prompt"] == "Explain this repository"
 
+def test_main_enables_tool_permission_policy_by_default(
+    monkeypatch,
+):
+    from corecoder.permissions import ToolPermissionPolicy
+
+    captured = {}
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--prompt",
+            "Explain this repository",
+        ],
+    )
+
+    cli.main()
+
+    assert isinstance(
+        captured["agent_kwargs"]["permission_policy"],
+        ToolPermissionPolicy,
+    )
+
+def test_main_wires_tool_approval_callback(
+    monkeypatch,
+):
+    captured = {}
+    _patch_runtime(monkeypatch, captured)
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once",
+        lambda agent, prompt: None,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "corecoder",
+            "--prompt",
+            "Explain this repository",
+        ],
+    )
+
+    cli.main()
+
+    assert (
+        captured["agent_kwargs"]["request_tool_approval"]
+        is cli._request_tool_approval
+    )
+
 
 def test_main_preserves_interactive_mode(monkeypatch):
     _patch_runtime(monkeypatch)
@@ -4805,3 +4863,49 @@ def test_request_commit_approval_accepts_reject(monkeypatch):
         summary,
         validation,
     ) is False
+
+def test_request_tool_approval_accepts_approve(monkeypatch):
+    from corecoder.permissions import (
+        ToolApprovalRequest,
+        ToolPermission,
+    )
+
+    request = ToolApprovalRequest(
+        tool_name="write_file",
+        permission=ToolPermission.WRITE,
+        arguments={
+            "path": "example.py",
+            "content": "hello",
+        },
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "pt_prompt",
+        lambda prompt: "approve",
+    )
+
+    assert cli._request_tool_approval(request) is True
+
+def test_request_tool_approval_accepts_reject(monkeypatch):
+    from corecoder.permissions import (
+        ToolApprovalRequest,
+        ToolPermission,
+    )
+
+    request = ToolApprovalRequest(
+        tool_name="write_file",
+        permission=ToolPermission.WRITE,
+        arguments={
+            "path": "example.py",
+            "content": "hello",
+        },
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "pt_prompt",
+        lambda prompt: "reject",
+    )
+
+    assert cli._request_tool_approval(request) is False

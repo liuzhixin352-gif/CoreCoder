@@ -2,6 +2,9 @@
 
 import re
 from pathlib import Path
+
+from corecoder.permissions import ToolPermission
+
 from .base import Tool
 
 # skip these dirs to avoid noise
@@ -10,6 +13,7 @@ _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".tox", "d
 
 class GrepTool(Tool):
     name = "grep"
+    permission = ToolPermission.READ
     description = (
         "Search file contents with regex. "
         "Returns matching lines with file path and line number."

@@ -3,6 +3,7 @@
 import json
 
 from corecoder.issue_task import parse_issue_task
+from corecoder.permissions import ToolPermission
 
 from .base import Tool
 
@@ -23,6 +24,7 @@ class ParseIssueTool(Tool):
     """Convert issue fields into a structured repair task."""
 
     name = "parse_issue"
+    permission = ToolPermission.READ
 
     description = (
         "Convert a software issue title, body, labels, number, and URL into "
