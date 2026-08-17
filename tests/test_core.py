@@ -16,7 +16,7 @@ def test_public_api_exports():
     assert Agent is not None
     assert LLM is not None
     assert Config is not None
-    assert len(ALL_TOOLS) == 11
+    assert len(ALL_TOOLS) == 12
 
 
 def test_config_from_env(monkeypatch):
@@ -680,6 +680,7 @@ def test_all_registered_tools_have_expected_permissions():
         "agent": ToolPermission.EXECUTE,
         "run_tests": ToolPermission.EXECUTE,
         "repo_map": ToolPermission.READ,
+        "code_search": ToolPermission.READ,
         "parse_issue": ToolPermission.READ,
         "fetch_issue": ToolPermission.READ,
     }

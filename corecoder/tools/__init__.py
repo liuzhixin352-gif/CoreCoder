@@ -9,6 +9,7 @@ from .grep import GrepTool
 from .agent import AgentTool
 from .run_tests import RunTestsTool
 from .repo_map import RepoMapTool
+from .code_search import CodeSearchTool
 from .parse_issue import ParseIssueTool
 from .fetch_issue import FetchIssueTool
 
@@ -22,6 +23,7 @@ ALL_TOOLS = [
     AgentTool(),
     RunTestsTool(),
     RepoMapTool(),
+    CodeSearchTool(),
     ParseIssueTool(),
     FetchIssueTool(),
 ]

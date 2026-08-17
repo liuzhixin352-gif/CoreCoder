@@ -10,6 +10,7 @@ class Tool(ABC):
     description: str
     parameters: dict  # JSON Schema for the function args
     permission: ToolPermission = ToolPermission.UNKNOWN
+    context_priority: str | None = None
 
     @abstractmethod
     def execute(self, **kwargs) -> str:
