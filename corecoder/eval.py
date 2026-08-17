@@ -5,7 +5,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-
+from .code_rag import search_repository
 
 @dataclass(frozen=True)
 class EvalCase:
@@ -21,7 +21,119 @@ class EvalCase:
 
         return output == self.expected_output
 
+@dataclass(frozen=True)
+class CodeRetrievalEvalCase:
+    """One reproducible code retrieval evaluation case."""
 
+    name: str
+    query: str
+    expected_symbol: str
+    top_k: int = 5
+
+@dataclass(frozen=True)
+class CodeRetrievalEvalResult:
+    """Outcome of one code retrieval evaluation case."""
+
+    case_name: str
+    success: bool
+    rank: int | None
+    retrieved_symbols: tuple[str, ...]
+
+@dataclass(frozen=True)
+class CodeRetrievalEvalReport:
+    """Aggregate results for a code retrieval evaluation run."""
+
+    results: tuple[CodeRetrievalEvalResult, ...]
+
+    @property
+    def hit_rate(self) -> float:
+        if not self.results:
+            return 0.0
+
+        hits = sum(
+            1
+            for result in self.results
+            if result.success
+        )
+        return hits / len(self.results)
+
+    @property
+    def mrr(self) -> float:
+        if not self.results:
+            return 0.0
+
+        reciprocal_ranks = (
+            0.0 if result.rank is None else 1.0 / result.rank
+            for result in self.results
+        )
+
+        return sum(reciprocal_ranks) / len(self.results)
+
+    def to_dict(self) -> dict:
+        return {
+            "hit_rate": self.hit_rate,
+            "mrr": self.mrr,
+            "results": [
+                {
+                    "case_name": result.case_name,
+                    "success": result.success,
+                    "rank": result.rank,
+                    "retrieved_symbols": list(
+                        result.retrieved_symbols
+                    ),
+                }
+                for result in self.results
+            ],
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict())
+
+class CodeRetrievalEvalRunner:
+    """Run reproducible evaluations against repository code retrieval."""
+
+    def __init__(self, repo_root: str | Path):
+        self.repo_root = Path(repo_root)
+
+    def run_case(
+        self,
+        case: CodeRetrievalEvalCase,
+    ) -> CodeRetrievalEvalResult:
+        results = search_repository(
+            self.repo_root,
+            case.query,
+            top_k=case.top_k,
+        )
+
+        retrieved_symbols = tuple(
+            result.chunk.symbol
+            for result in results
+        )
+
+        try:
+            rank = retrieved_symbols.index(case.expected_symbol) + 1
+        except ValueError:
+            rank = None
+
+        return CodeRetrievalEvalResult(
+            case_name=case.name,
+            success=rank is not None,
+            rank=rank,
+            retrieved_symbols=retrieved_symbols,
+        )
+
+    def run(
+        self,
+        cases: list[CodeRetrievalEvalCase],
+    ) -> CodeRetrievalEvalReport:
+        results = tuple(
+            self.run_case(case)
+            for case in cases
+        )
+
+        return CodeRetrievalEvalReport(
+            results=results,
+        )
 @dataclass(frozen=True)
 class EvalResult:
     """Outcome of one agent evaluation task."""

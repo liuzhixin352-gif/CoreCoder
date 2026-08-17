@@ -195,11 +195,17 @@ class Agent:
                 )
 
                 for tc, result in zip(resp.tool_calls, results):
-                    self.messages.append({
+                    tool_message = {
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": result,
-                    })
+                    }
+
+                    tool = self._tool_by_name.get(tc.name)
+                    if tool is not None and tool.context_priority is not None:
+                        tool_message["context_priority"] = tool.context_priority
+
+                    self.messages.append(tool_message)
             except KeyboardInterrupt:
                 # Ctrl+C mid-execution would leave the assistant tool_calls
                 # message without replies, poisoning the next request; backfill
