@@ -15,6 +15,11 @@ from .permissions import (
 )
 from .tools.base import Tool
 from .tracing import TraceEvent, Tracer
+from .budget import (
+    BudgetLimits,
+    BudgetTracker,
+    BudgetUsage,
+)
 
 
 class MultiAgentRole(str, Enum):
@@ -118,7 +123,12 @@ def create_role_agent(
 class RoleAgent(Protocol):
     """Minimal agent interface required by role adapters."""
 
-    def chat(self, message: str) -> str:
+    def chat(
+        self,
+        message: str,
+        *,
+        budget_tracker: BudgetTracker | None = None,
+    ) -> str:
         """Run one role-specific agent turn."""
         ...
 
@@ -126,7 +136,12 @@ class RoleAgent(Protocol):
 class Planner(Protocol):
     """Produce an implementation plan for a task."""
 
-    def plan(self, task: str) -> str:
+    def plan(
+        self,
+        task: str,
+        *,
+        budget_tracker: BudgetTracker | None = None,
+    ) -> str:
         """Return a plan for the task."""
         ...
 
@@ -137,7 +152,12 @@ class AgentPlanner:
     def __init__(self, agent: RoleAgent):
         self.agent = agent
 
-    def plan(self, task: str) -> str:
+    def plan(
+        self,
+        task: str,
+        *,
+        budget_tracker: BudgetTracker | None = None,
+    ) -> str:
         """Ask the backing agent to produce an implementation plan."""
         prompt = (
             "You are the Planner in a software engineering "
@@ -147,7 +167,13 @@ class AgentPlanner:
             f"Task:\n{task}"
         )
 
-        return self.agent.chat(prompt)
+        if budget_tracker is None:
+            return self.agent.chat(prompt)
+
+        return self.agent.chat(
+            prompt,
+            budget_tracker=budget_tracker,
+        )
 
 
 class Coder(Protocol):
@@ -159,6 +185,7 @@ class Coder(Protocol):
         plan: str,
         *,
         feedback: str | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> str:
         """Return the implementation result."""
         ...
@@ -176,6 +203,7 @@ class AgentCoder:
         plan: str,
         *,
         feedback: str | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> str:
         """Ask the backing agent to implement the task."""
         prompt = (
@@ -189,7 +217,13 @@ class AgentCoder:
         if feedback:
             prompt += f"\n\nReviewer feedback:\n{feedback}\n\nRevise the implementation to address this feedback."
 
-        return self.agent.chat(prompt)
+        if budget_tracker is None:
+            return self.agent.chat(prompt)
+
+        return self.agent.chat(
+            prompt,
+            budget_tracker=budget_tracker,
+        )
 
 
 class ReviewOutputError(ValueError):
@@ -212,6 +246,8 @@ class Reviewer(Protocol):
         task: str,
         plan: str,
         implementation: str,
+        *,
+        budget_tracker: BudgetTracker | None = None,
     ) -> ReviewResult:
         """Return the review result."""
         ...
@@ -228,6 +264,8 @@ class AgentReviewer:
         task: str,
         plan: str,
         implementation: str,
+        *,
+        budget_tracker: BudgetTracker | None = None,
     ) -> ReviewResult:
         """Ask the backing agent to review an implementation."""
         prompt = (
@@ -243,7 +281,13 @@ class AgentReviewer:
             f"Implementation:\n{implementation}"
         )
 
-        raw_response = self.agent.chat(prompt)
+        if budget_tracker is None:
+            raw_response = self.agent.chat(prompt)
+        else:
+            raw_response = self.agent.chat(
+                prompt,
+                budget_tracker=budget_tracker,
+            )
 
         try:
             payload = json.loads(raw_response)
@@ -296,6 +340,7 @@ class MultiAgentOrchestrator:
         coder: Coder,
         reviewer: Reviewer,
         max_review_rounds: int = 2,
+        budget_limits: BudgetLimits | None = None,
     ):
         if max_review_rounds < 1:
             raise ValueError("max_review_rounds must be at least 1")
@@ -304,37 +349,94 @@ class MultiAgentOrchestrator:
         self.coder = coder
         self.reviewer = reviewer
         self.max_review_rounds = max_review_rounds
+        self.budget_limits = budget_limits
+        self.last_budget_usage: BudgetUsage | None = None
 
-    def run(self, task: str) -> MultiAgentResult:
+    def run(
+        self,
+        task: str,
+        *,
+        budget_tracker: BudgetTracker | None = None,
+    ) -> MultiAgentResult:
         """Run one Planner -> Coder -> Reviewer workflow."""
-        plan = self.planner.plan(task)
+        resolved_budget_tracker = budget_tracker
 
-        implementation = self.coder.code(
-            task,
-            plan,
+        if resolved_budget_tracker is None and self.budget_limits is not None:
+            resolved_budget_tracker = BudgetTracker(
+                self.budget_limits,
+            )
+
+        self.last_budget_usage = (
+            resolved_budget_tracker.usage
+            if resolved_budget_tracker is not None
+            else None
         )
 
-        review = self.reviewer.review(
-            task,
-            plan,
-            implementation,
-        )
+        if resolved_budget_tracker is None:
+            plan = self.planner.plan(task)
+        else:
+            plan = self.planner.plan(
+                task,
+                budget_tracker=resolved_budget_tracker,
+            )
 
-        for _ in range(1, self.max_review_rounds):
-            if review.approved:
-                break
-
+        if resolved_budget_tracker is None:
             implementation = self.coder.code(
                 task,
                 plan,
-                feedback=review.feedback,
+            )
+        else:
+            implementation = self.coder.code(
+                task,
+                plan,
+                budget_tracker=resolved_budget_tracker,
             )
 
+        if resolved_budget_tracker is None:
             review = self.reviewer.review(
                 task,
                 plan,
                 implementation,
             )
+        else:
+            review = self.reviewer.review(
+                task,
+                plan,
+                implementation,
+                budget_tracker=resolved_budget_tracker,
+            )
+
+        for _ in range(1, self.max_review_rounds):
+            if review.approved:
+                break
+
+            if resolved_budget_tracker is None:
+                implementation = self.coder.code(
+                    task,
+                    plan,
+                    feedback=review.feedback,
+                )
+            else:
+                implementation = self.coder.code(
+                    task,
+                    plan,
+                    feedback=review.feedback,
+                    budget_tracker=resolved_budget_tracker,
+                )
+
+            if resolved_budget_tracker is None:
+                review = self.reviewer.review(
+                    task,
+                    plan,
+                    implementation,
+                )
+            else:
+                review = self.reviewer.review(
+                    task,
+                    plan,
+                    implementation,
+                    budget_tracker=resolved_budget_tracker,
+                )
 
         return MultiAgentResult(
             plan=plan,
@@ -351,6 +453,7 @@ def create_multi_agent_orchestrator(
     permission_policy: ToolPermissionPolicy | None = None,
     request_tool_approval: (Callable[[ToolApprovalRequest], bool] | None) = None,
     max_review_rounds: int = 2,
+    budget_limits: BudgetLimits | None = None,
     tracer: Tracer | None = None,
 ) -> MultiAgentOrchestrator:
     """Create a production Planner/Coder/Reviewer workflow."""
@@ -391,4 +494,5 @@ def create_multi_agent_orchestrator(
         coder=AgentCoder(coder_agent),
         reviewer=AgentReviewer(reviewer_agent),
         max_review_rounds=max_review_rounds,
+        budget_limits=budget_limits,
     )

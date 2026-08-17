@@ -21,6 +21,11 @@ from corecoder.permissions import (
 from corecoder.tools.base import Tool
 from corecoder.llm import LLMResponse
 from corecoder.tracing import InMemoryTracer
+from corecoder.budget import (
+    BudgetExceededError,
+    BudgetLimits,
+    BudgetTracker,
+)
 
 
 def test_multi_agent_runs_planner_coder_reviewer_in_order():
@@ -1148,3 +1153,304 @@ def test_agent_reviewer_requires_feedback_when_rejected():
             "implementation plan",
             "implementation",
         )
+
+
+def test_multi_agent_workflow_shares_budget_across_roles():
+    tracer = InMemoryTracer()
+
+    class FakeLLM:
+        model = "gpt-4o-mini"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            self.calls += 1
+
+            prompt = messages[-1]["content"]
+
+            if "You are the Planner" in prompt:
+                return LLMResponse(
+                    content="implementation plan",
+                    prompt_tokens=4,
+                    completion_tokens=1,
+                )
+
+            if "You are the Coder" in prompt:
+                return LLMResponse(
+                    content="implementation",
+                    prompt_tokens=4,
+                    completion_tokens=1,
+                )
+
+            return LLMResponse(
+                content=('{"approved": true, "feedback": ""}'),
+                prompt_tokens=4,
+                completion_tokens=1,
+            )
+
+    llm = FakeLLM()
+
+    orchestrator = create_multi_agent_orchestrator(
+        llm=llm,
+        tools=[],
+        tracer=tracer,
+        budget_limits=BudgetLimits(
+            max_total_tokens=12,
+        ),
+    )
+
+    with pytest.raises(
+        BudgetExceededError,
+    ) as exc_info:
+        orchestrator.run(
+            "Implement permission checks",
+        )
+
+    assert exc_info.value.resource == "total_tokens"
+    assert llm.calls == 3
+
+    assert orchestrator.last_budget_usage is not None
+    assert orchestrator.last_budget_usage.total_tokens == 15
+
+    exceeded_events = [event for event in tracer.events if event.name == "budget.exceeded"]
+
+    assert len(exceeded_events) == 1
+    assert exceeded_events[0].attributes["role"] == "reviewer"
+    assert exceeded_events[0].attributes["total_tokens"] == 15
+
+
+def test_multi_agent_workflow_uses_fresh_budget_each_run():
+    class FakeLLM:
+        model = "gpt-4o-mini"
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            prompt = messages[-1]["content"]
+
+            if "You are the Planner" in prompt:
+                content = "implementation plan"
+            elif "You are the Coder" in prompt:
+                content = "implementation"
+            else:
+                content = '{"approved": true, "feedback": ""}'
+
+            return LLMResponse(
+                content=content,
+                prompt_tokens=4,
+                completion_tokens=1,
+            )
+
+    orchestrator = create_multi_agent_orchestrator(
+        llm=FakeLLM(),
+        tools=[],
+        budget_limits=BudgetLimits(
+            max_total_tokens=15,
+        ),
+    )
+
+    first = orchestrator.run(
+        "First task",
+    )
+
+    assert first.review.approved is True
+    assert orchestrator.last_budget_usage is not None
+    assert orchestrator.last_budget_usage.total_tokens == 15
+
+    second = orchestrator.run(
+        "Second task",
+    )
+
+    assert second.review.approved is True
+    assert orchestrator.last_budget_usage is not None
+    assert orchestrator.last_budget_usage.total_tokens == 15
+
+
+def test_multi_agent_workflow_accepts_external_budget_tracker():
+    class FakeLLM:
+        model = "gpt-4o-mini"
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            prompt = messages[-1]["content"]
+
+            if "You are the Planner" in prompt:
+                content = "implementation plan"
+            elif "You are the Coder" in prompt:
+                content = "implementation"
+            else:
+                content = '{"approved": true, "feedback": ""}'
+
+            return LLMResponse(
+                content=content,
+                prompt_tokens=4,
+                completion_tokens=1,
+            )
+
+    tracker = BudgetTracker(
+        BudgetLimits(
+            max_total_tokens=15,
+        )
+    )
+
+    orchestrator = create_multi_agent_orchestrator(
+        llm=FakeLLM(),
+        tools=[],
+        budget_limits=BudgetLimits(
+            max_total_tokens=100,
+        ),
+    )
+
+    result = orchestrator.run(
+        "Implement permission checks",
+        budget_tracker=tracker,
+    )
+
+    assert result.review.approved is True
+
+    assert tracker.usage.total_tokens == 15
+
+    assert orchestrator.last_budget_usage is tracker.usage
+
+
+def test_multi_agent_revision_loop_shares_workflow_budget():
+    class FakeLLM:
+        model = "gpt-4o-mini"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            self.calls += 1
+
+            prompt = messages[-1]["content"]
+
+            if "You are the Planner" in prompt:
+                content = "implementation plan"
+
+            elif "You are the Coder" in prompt:
+                if "Reviewer feedback:" in prompt:
+                    content = "revised implementation"
+                else:
+                    content = "initial implementation"
+
+            elif "initial implementation" in prompt:
+                content = '{"approved": false, "feedback": "Revise it"}'
+
+            else:
+                content = '{"approved": true, "feedback": ""}'
+
+            return LLMResponse(
+                content=content,
+                prompt_tokens=4,
+                completion_tokens=1,
+            )
+
+    llm = FakeLLM()
+
+    orchestrator = create_multi_agent_orchestrator(
+        llm=llm,
+        tools=[],
+        budget_limits=BudgetLimits(
+            max_total_tokens=25,
+        ),
+        max_review_rounds=2,
+    )
+
+    result = orchestrator.run(
+        "Implement permission checks",
+    )
+
+    assert result.implementation == ("revised implementation")
+    assert result.review.approved is True
+
+    assert llm.calls == 5
+
+    assert orchestrator.last_budget_usage is not None
+    assert orchestrator.last_budget_usage.total_tokens == 25
+
+
+def test_multi_agent_stops_following_roles_after_budget_exceeded():
+    tracer = InMemoryTracer()
+
+    class FakeLLM:
+        model = "gpt-4o-mini"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            self.calls += 1
+
+            prompt = messages[-1]["content"]
+
+            if "You are the Planner" in prompt:
+                return LLMResponse(
+                    content="implementation plan",
+                    prompt_tokens=4,
+                    completion_tokens=1,
+                )
+
+            if "You are the Coder" in prompt:
+                return LLMResponse(
+                    content="implementation",
+                    prompt_tokens=6,
+                    completion_tokens=1,
+                )
+
+            raise AssertionError("Reviewer must not run after the Coder exceeds budget")
+
+    llm = FakeLLM()
+
+    orchestrator = create_multi_agent_orchestrator(
+        llm=llm,
+        tools=[],
+        tracer=tracer,
+        budget_limits=BudgetLimits(
+            max_total_tokens=10,
+        ),
+    )
+
+    with pytest.raises(
+        BudgetExceededError,
+    ) as exc_info:
+        orchestrator.run(
+            "Implement permission checks",
+        )
+
+    assert exc_info.value.resource == "total_tokens"
+
+    assert llm.calls == 2
+
+    assert orchestrator.last_budget_usage is not None
+    assert orchestrator.last_budget_usage.total_tokens == 12
+
+    started_roles = [event.attributes["role"] for event in tracer.events if event.name == "agent.started"]
+
+    assert started_roles == [
+        "planner",
+        "coder",
+    ]

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from uuid import uuid4
 from .tracing import TraceEvent, Tracer
 from .tool_runtime import run_tool_calls
-from .llm import LLM
+from .llm import LLM, LLMResponse, estimate_cost_usd
 from .tools import ALL_TOOLS
 from .tools.base import Tool
 from .tools.agent import AgentTool
@@ -28,20 +28,29 @@ from .permissions import (
     ToolApprovalRequest,
     ToolPermissionPolicy,
 )
+from .budget import (
+    BudgetExceededError,
+    BudgetLimits,
+    BudgetPricingUnavailableError,
+    BudgetTracker,
+    BudgetUsage,
+)
+
 
 class Agent:
     def __init__(
-    self,
-    llm: LLM,
-    tools: list[Tool] | None = None,
-    max_context_tokens: int = 128_000,
-    max_rounds: int = 50,
-    tool_timeout: float | None = None,
-    tracer: Tracer | None = None,
-    permission_policy: ToolPermissionPolicy | None = None,
-    request_tool_approval: (
-        Callable[[ToolApprovalRequest], bool] | None
-    ) = None,
+        self,
+        llm: LLM,
+        tools: list[Tool] | None = None,
+        max_context_tokens: int = 128_000,
+        max_rounds: int = 50,
+        tool_timeout: float | None = None,
+        tracer: Tracer | None = None,
+        permission_policy: ToolPermissionPolicy | None = None,
+        request_tool_approval: (
+            Callable[[ToolApprovalRequest], bool] | None
+        ) = None,
+        budget_limits: BudgetLimits | None = None,
     ):
         self.llm = llm
         self.tools = tools if tools is not None else ALL_TOOLS
@@ -53,14 +62,139 @@ class Agent:
         self.tracer = tracer
         self.permission_policy = permission_policy
         self.request_tool_approval = request_tool_approval
+        self.budget_limits = budget_limits
+        self.last_budget_usage: BudgetUsage | None = None
         self._active_run_id: str | None = None
         self._system = system_prompt(self.tools)
-
 
         # wire up sub-agent capability
         for t in self.tools:
             if isinstance(t, AgentTool):
                 t._parent_agent = self
+
+    def _resolve_budget_tracker(
+        self,
+        budget_tracker: BudgetTracker | None,
+    ) -> BudgetTracker | None:
+        """Resolve an explicit or per-run budget tracker."""
+        if budget_tracker is not None:
+            return budget_tracker
+
+        if self.budget_limits is None:
+            return None
+
+        return BudgetTracker(
+            self.budget_limits,
+        )
+
+    def _validate_budget_pricing(
+        self,
+        budget_tracker: BudgetTracker | None,
+    ) -> None:
+        """Fail before execution when a cost budget cannot be priced."""
+        if budget_tracker is None:
+            return
+
+        if budget_tracker.limits.max_cost_usd is None:
+            return
+
+        model = getattr(
+            self.llm,
+            "model",
+            None,
+        )
+
+        if (
+            not isinstance(model, str)
+            or estimate_cost_usd(
+                model,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+            is None
+        ):
+            raise BudgetPricingUnavailableError(
+                model,
+            )
+
+    def _record_budget_usage(
+        self,
+        budget_tracker: BudgetTracker | None,
+        response: LLMResponse,
+    ) -> None:
+        """Record one completed LLM response against the active budget."""
+        if budget_tracker is None:
+            return
+
+        model = getattr(
+            self.llm,
+            "model",
+            None,
+        )
+
+        cost_usd = None
+
+        if isinstance(model, str):
+            cost_usd = estimate_cost_usd(
+                model,
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
+            )
+
+        budget_tracker.record(
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
+            cost_usd=(cost_usd if cost_usd is not None else 0.0),
+        )
+
+        self._emit_budget_trace(
+            budget_tracker,
+            name="budget.updated",
+        )
+
+    def _emit_budget_trace(
+        self,
+        budget_tracker: BudgetTracker,
+        *,
+        name: str,
+        resource: str | None = None,
+        limit: int | float | None = None,
+        actual: int | float | None = None,
+    ) -> None:
+        """Emit current budget usage and limits."""
+        if self.tracer is None:
+            return
+
+        usage = budget_tracker.usage
+        limits = budget_tracker.limits
+
+        attributes: dict[str, object] = {
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "cost_usd": usage.cost_usd,
+            "max_prompt_tokens": limits.max_prompt_tokens,
+            "max_completion_tokens": limits.max_completion_tokens,
+            "max_total_tokens": limits.max_total_tokens,
+            "max_cost_usd": limits.max_cost_usd,
+        }
+
+        if resource is not None:
+            attributes["resource"] = resource
+
+        if limit is not None:
+            attributes["limit"] = limit
+
+        if actual is not None:
+            attributes["actual"] = actual
+
+        self._emit_trace(
+            TraceEvent(
+                name=name,
+                timestamp=time.time(),
+                attributes=attributes,
+            )
+        )
 
     def _full_messages(self) -> list[dict]:
         messages = [
@@ -84,8 +218,23 @@ class Agent:
         on_tool=None,
         *,
         run_id: str | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> str:
         """Process one user message. May involve multiple LLM/tool rounds."""
+        resolved_budget_tracker = self._resolve_budget_tracker(
+            budget_tracker,
+        )
+
+        self.last_budget_usage = (
+            resolved_budget_tracker.usage
+            if resolved_budget_tracker is not None
+            else None
+        )
+
+        self._validate_budget_pricing(
+            resolved_budget_tracker,
+        )
+
         self._active_run_id = run_id or uuid4().hex
         agent_started_at = time.perf_counter()
 
@@ -101,6 +250,20 @@ class Agent:
         self._emit_context_trace("pre_llm")
 
         for round_number in range(1, self.max_rounds + 1):
+            if resolved_budget_tracker is not None:
+                try:
+                    resolved_budget_tracker.ensure_can_continue()
+                except BudgetExceededError as exc:
+                    self._emit_budget_trace(
+                        resolved_budget_tracker,
+                        name="budget.exceeded",
+                        resource=exc.resource,
+                        limit=exc.limit,
+                        actual=exc.actual,
+                    )
+
+                    self._active_run_id = None
+                    raise
             llm_started_at = time.perf_counter()
 
             if self.tracer is not None:
@@ -132,25 +295,25 @@ class Agent:
                                 "duration_ms": (
                                     time.perf_counter() - llm_started_at
                                 )
-                                * 1000,
+                            * 1000,
                             },
                         )
                     )
 
                     self._emit_trace(
-                                    TraceEvent(
-                                        name="agent.failed",
-                                        timestamp=time.time(),
-                                        attributes={
-                                         "error_type": type(e).__name__,
-                                        "llm_rounds": round_number,
-                                         "duration_ms": (
-                                        time.perf_counter() - agent_started_at
-                                         )
-                                         * 1000,
-                                         },
-                                                    )
-                                                )
+                        TraceEvent(
+                            name="agent.failed",
+                            timestamp=time.time(),
+                            attributes={
+                                "error_type": type(e).__name__,
+                                "llm_rounds": round_number,
+                                "duration_ms": (
+                                    time.perf_counter() - agent_started_at
+                                )
+                                 * 1000,
+                            },
+                        )
+                    )
                 self._active_run_id = None
                 raise
 
@@ -169,6 +332,26 @@ class Agent:
                     )
                 )
 
+            try:
+                self._record_budget_usage(
+                    resolved_budget_tracker,
+                    resp,
+                )
+            except BudgetExceededError as exc:
+                if resolved_budget_tracker is not None:
+                    self._emit_budget_trace(
+                        resolved_budget_tracker,
+                        name="budget.exceeded",
+                        resource=exc.resource,
+                        limit=exc.limit,
+                        actual=exc.actual,
+                    )
+
+                self._active_run_id = None
+                raise
+            except ValueError:
+                self._active_run_id = None
+                raise
             # no tool calls -> LLM is done, return text
             if not resp.tool_calls:
                 self.messages.append(resp.message)
@@ -180,9 +363,9 @@ class Agent:
                             timestamp=time.time(),
                             attributes={
                                 "duration_ms": (
-                                    time.perf_counter() - agent_started_at
-                                )
-                                * 1000,
+                                time.perf_counter() - agent_started_at
+                            )
+                            * 1000,
                                 "llm_rounds": round_number,
                             },
                         )
