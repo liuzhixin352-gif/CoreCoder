@@ -77,9 +77,16 @@ class Agent:
     def _tool_schemas(self) -> list[dict]:
         return [t.schema() for t in self.tools]
 
-    def chat(self, user_input: str, on_token=None, on_tool=None) -> str:
+    def chat(
+        self,
+        user_input: str,
+        on_token=None,
+        on_tool=None,
+        *,
+        run_id: str | None = None,
+    ) -> str:
         """Process one user message. May involve multiple LLM/tool rounds."""
-        self._active_run_id = uuid4().hex
+        self._active_run_id = run_id or uuid4().hex
         agent_started_at = time.perf_counter()
 
         if self.tracer is not None:

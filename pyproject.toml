@@ -40,10 +40,19 @@ packages = ["corecoder"]
 
 [project.optional-dependencies]
 litellm = ["litellm>=1.60.0,<2.0.0"]
-dev = ["pytest>=7.0", "ruff>=0.9.0"]
+service = [
+    "fastapi",
+    "uvicorn",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.9.0",
+    "httpx",
+]
 
 [project.scripts]
 corecoder = "corecoder.cli:main"
+corecoder-service = "corecoder.service:main"
 
 [project.urls]
 Homepage = "https://github.com/he-yufeng/CoreCoder"
