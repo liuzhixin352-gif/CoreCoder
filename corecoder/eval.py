@@ -5,6 +5,8 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
+from .budget import BudgetTracker
 from .code_rag import search_repository
 
 @dataclass(frozen=True)
@@ -146,13 +148,26 @@ class EvalResult:
     tool_calls: int = 0
     context_tokens_saved: int = 0
     error_type: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
 
 
 class EvalRunner:
     """Run reproducible evaluation cases against an agent."""
 
-    def __init__(self, agent):
+    def __init__(
+        self,
+        agent,
+        budget_tracker_factory: (
+            Callable[[], BudgetTracker] | None
+        ) = None,
+    ):
         self.agent = agent
+        self.budget_tracker_factory = (
+            budget_tracker_factory
+        )
 
     def run_case(self, case: EvalCase) -> EvalResult:
         tracer = getattr(self.agent, "tracer", None)
@@ -164,8 +179,23 @@ class EvalRunner:
         output = ""
         error_type = None
 
+        budget_tracker = (
+            self.budget_tracker_factory()
+            if self.budget_tracker_factory
+            is not None
+            else None
+        )
+
         try:
-            output = self.agent.chat(case.prompt)
+            if budget_tracker is None:
+                output = self.agent.chat(
+                    case.prompt
+                )
+            else:
+                output = self.agent.chat(
+                    case.prompt,
+                    budget_tracker=budget_tracker,
+                )
         except Exception as exc:
             error_type = type(exc).__name__
 
@@ -186,6 +216,22 @@ class EvalRunner:
                 event.attributes.get("tokens_saved", 0) for event in case_events if event.name == "context.managed"
             )
 
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        cost_usd = 0.0
+
+        if budget_tracker is not None:
+            usage = budget_tracker.usage
+
+            prompt_tokens = usage.prompt_tokens
+            completion_tokens = (
+                usage.completion_tokens
+            )
+            total_tokens = usage.total_tokens
+            cost_usd = usage.cost_usd
+
         return EvalResult(
             case_name=case.name,
             success=(error_type is None and case.matches(output)),
@@ -195,6 +241,10 @@ class EvalRunner:
             tool_calls=tool_calls,
             context_tokens_saved=context_tokens_saved,
             error_type=error_type,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cost_usd=cost_usd,
         )
 
     def run(self, cases: list[EvalCase]) -> EvalReport:
@@ -245,6 +295,59 @@ class EvalReport:
 
         return sum(result.tool_calls for result in self.results) / len(self.results)
 
+    @property
+    def total_prompt_tokens(self) -> int:
+        return sum(
+            result.prompt_tokens
+            for result in self.results
+        )
+
+
+    @property
+    def total_completion_tokens(self) -> int:
+        return sum(
+            result.completion_tokens
+            for result in self.results
+        )
+
+
+    @property
+    def total_tokens(self) -> int:
+        return sum(
+            result.total_tokens
+            for result in self.results
+        )
+
+
+    @property
+    def total_cost_usd(self) -> float:
+        return sum(
+            result.cost_usd
+            for result in self.results
+        )
+
+
+    @property
+    def avg_total_tokens(self) -> float:
+        if not self.results:
+            return 0.0
+
+        return (
+            self.total_tokens
+            / len(self.results)
+        )
+
+
+    @property
+    def avg_cost_usd(self) -> float:
+        if not self.results:
+            return 0.0
+
+        return (
+            self.total_cost_usd
+            / len(self.results)
+        )
+
     def to_dict(self) -> dict:
         return {
             "success_rate": self.success_rate,
@@ -252,6 +355,18 @@ class EvalReport:
             "avg_llm_rounds": self.avg_llm_rounds,
             "avg_tool_calls": self.avg_tool_calls,
             "avg_context_tokens_saved": (self.avg_context_tokens_saved),
+            "total_prompt_tokens": (
+                self.total_prompt_tokens
+            ),
+            "total_completion_tokens": (
+                self.total_completion_tokens
+            ),
+            "total_tokens": self.total_tokens,
+            "total_cost_usd": self.total_cost_usd,
+            "avg_total_tokens": (
+                self.avg_total_tokens
+            ),
+            "avg_cost_usd": self.avg_cost_usd,
             "results": [
                 {
                     "case_name": result.case_name,
@@ -262,6 +377,16 @@ class EvalReport:
                     "tool_calls": result.tool_calls,
                     "context_tokens_saved": (result.context_tokens_saved),
                     "error_type": result.error_type,
+                    "prompt_tokens": (
+                        result.prompt_tokens
+                    ),
+                    "completion_tokens": (
+                        result.completion_tokens
+                    ),
+                    "total_tokens": (
+                        result.total_tokens
+                    ),
+                    "cost_usd": result.cost_usd,
                 }
                 for result in self.results
             ],
