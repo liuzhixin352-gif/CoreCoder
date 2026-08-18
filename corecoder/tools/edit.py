@@ -10,6 +10,7 @@ import difflib
 from pathlib import Path
 
 from .base import Tool
+from ..permissions import ToolPermission
 
 # track files changed this session for /diff
 _changed_files: set[str] = set()
@@ -17,6 +18,7 @@ _changed_files: set[str] = set()
 
 class EditFileTool(Tool):
     name = "edit_file"
+    permission = ToolPermission.WRITE
     description = (
         "Edit a file by replacing an exact string match. "
         "old_string must appear exactly once in the file for safety. "

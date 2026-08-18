@@ -3,6 +3,8 @@
 import sys
 import os
 import argparse
+from json import JSONDecodeError
+from pathlib import Path
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -11,14 +13,101 @@ from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
+from .tools import ALL_TOOLS
 from .agent import Agent
 from .llm import LLM, LiteLLM
 from .config import Config
+from .github_issue import (
+    GitHubIssueFetchError,
+    GitHubIssueReferenceError,
+    fetch_github_issue,
+)
+from .issue_workflow import (
+    IssueWorkflowError,
+    build_issue_repair_prompt,
+)
+from .post_repair import (
+    PostRepairSummary,
+    PostRepairSummaryError,
+    collect_post_repair_summary,
+)
+from .post_repair_validation import (
+    PostRepairValidation,
+    PostRepairValidationError,
+    run_post_repair_validation,
+)
+from .repair_commit import (
+    RepairCommitError,
+    create_repair_commit,
+)
+from .repair_push import (
+    RepairPushError,
+    push_repair_branch,
+)
+from .repair_branch import (
+    RepairBranchError,
+    create_repair_branch,
+    get_current_branch,
+)
+from .repository_guard import (
+    RepositoryGuardError,
+    check_issue_repository,
+    check_worktree,
+)
+from .repair_pr import (
+    RepairPullRequestError,
+    create_repair_pull_request,
+)
+from .repair_ci import (
+    RepairCIStatusError,
+    wait_for_repair_ci_status,
+    build_repair_ci_failure_prompt,
+    fetch_repair_check_log,
+)
+
 from .session import save_session, load_session, list_sessions
 from . import __version__
+from .issue_orchestration import (
+    load_workflow_checkpoint,
+    run_issue_workflow,
+    save_workflow_checkpoint,
+)
+from .permissions import (
+    ToolApprovalRequest,
+    ToolPermissionPolicy,
+)
 
 console = Console()
+_DRY_RUN_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "glob",
+        "grep",
+        "repo_map",
+    }
+)
 
+
+def _tools_for_issue_workflow(*, dry_run: bool):
+    """Return the Agent tool profile for an Issue workflow."""
+    if not dry_run:
+        return None
+
+    return [
+        tool
+        for tool in ALL_TOOLS
+        if tool.name in _DRY_RUN_TOOL_NAMES
+    ]
+
+def _format_local_repositories(preflight) -> str:
+    """Return local GitHub repositories for CLI messages."""
+    if not preflight.local_repositories:
+        return "no GitHub remotes found"
+
+    return ", ".join(
+        repository.full_name
+        for repository in preflight.local_repositories
+    )
 
 def _parse_args():
     p = argparse.ArgumentParser(
@@ -28,14 +117,285 @@ def _parse_args():
     p.add_argument("-m", "--model", help="Model name (default: $CORECODER_MODEL or gpt-5.5)")
     p.add_argument("--base-url", help="API base URL (default: $OPENAI_BASE_URL)")
     p.add_argument("--api-key", help="API key (default: $OPENAI_API_KEY)")
-    p.add_argument("-p", "--prompt", help="One-shot prompt (non-interactive mode)")
+    input_group = p.add_mutually_exclusive_group()
+
+    input_group.add_argument(
+        "-p",
+        "--prompt",
+        help="One-shot prompt (non-interactive mode)",
+    )
+    input_group.add_argument(
+        "--issue",
+        metavar="URL",
+        help=(
+            "Fetch a GitHub Issue URL and run a structured "
+            "DevPilot repair workflow"
+        ),
+    )
+
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Analyze the GitHub Issue and propose a repair "
+            "without modifying files"
+        ),
+    )
+    p.add_argument(
+        "--allow-unverified-repository",
+        action="store_true",
+        help=(
+            "Allow a real Issue repair when the current "
+            "GitHub repository cannot be verified"
+        ),
+    )
+    p.add_argument(
+        "--resume-workflow",
+        action="store_true",
+        help="Resume a saved DevPilot Issue workflow checkpoint",
+    )
     p.add_argument("-r", "--resume", metavar="ID", help="Resume a saved session")
     p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
-    return p.parse_args()
+    args = p.parse_args()
+
+    if args.dry_run and not args.issue:
+        p.error("--dry-run requires --issue")
+
+    if args.resume_workflow and not args.issue:
+        p.error("--resume-workflow requires --issue")
+
+    if args.allow_unverified_repository and not args.issue:
+        p.error(
+        "--allow-unverified-repository requires --issue"
+        )
+
+    return args
+
+def _request_tool_approval(
+    request: ToolApprovalRequest,
+) -> bool:
+    console.print()
+    console.print("[bold]Tool approval required[/]")
+    console.print(f"  Tool: [yellow]{request.tool_name}[/yellow]")
+    console.print(
+        f"  Permission: [yellow]{request.permission.value}[/yellow]"
+    )
+    console.print(f"  Arguments: {request.arguments}")
+
+    response = pt_prompt(
+        "Approve tool execution? [approve/reject] > "
+    ).strip().lower()
+
+    return response == "approve"
+
+def _request_commit_approval(
+    summary: PostRepairSummary,
+    validation: PostRepairValidation,
+) -> bool:
+    console.print()
+    console.print("[bold]Commit approval required[/]")
+
+    for change in summary.changes:
+        console.print(f"  [yellow]{change}[/yellow]")
+
+    console.print(
+        "[bold]Validation:[/] "
+        f"{validation.passed_count} passed"
+    )
+
+    response = pt_prompt(
+        "Approve commit? [approve/reject] > "
+    ).strip().lower()
+
+    return response == "approve"
 
 
 def main():
     args = _parse_args()
+
+    issue_task = None
+    issue_prompt = None
+    repository_preflight = None
+    repair_branch = None
+    repair_base_branch = None
+    workflow_checkpoint = None
+
+
+    if args.issue:
+        try:
+            issue_task = fetch_github_issue(
+                issue_url=args.issue,
+            )
+
+            repository_preflight = check_issue_repository(
+                issue_task
+            )
+
+            checkpoint_path = (
+                            Path.home()
+                            / ".corecoder"
+                            / "workflows"
+                            / repository_preflight.target.full_name
+                            / f"issue-{issue_task.issue_number}.json"
+                        )
+
+            if repository_preflight.status == "mismatch":
+                local_repositories = _format_local_repositories(
+                    repository_preflight
+                )
+
+                console.print(
+                    "[red bold]Repository mismatch:[/] "
+                    f"Issue belongs to "
+                    f"[cyan]{repository_preflight.target.full_name}[/cyan], "
+                    f"but the current repository remotes are "
+                    f"[yellow]{local_repositories}[/yellow]."
+                )
+                console.print(
+                    "Run DevPilot from the matching repository "
+                    "before attempting this Issue."
+                )
+                sys.exit(1)
+
+            if repository_preflight.status == "unknown":
+                if args.dry_run:
+                    console.print(
+                        "[yellow bold]Repository verification warning:[/] "
+                        "No supported GitHub remote was found. "
+                        "Continuing in read-only dry-run mode."
+                    )
+                elif not args.allow_unverified_repository:
+                    console.print(
+                        "[red bold]Repository verification required:[/] "
+                        "No supported GitHub remote was found. "
+                        "Real Issue repair is blocked by default."
+                    )
+                    console.print(
+                        "Use --dry-run for read-only analysis, or pass "
+                        "--allow-unverified-repository only after "
+                        "independently verifying the current repository."
+                    )
+                    sys.exit(1)
+                else:
+                    console.print(
+                        "[yellow bold]Repository verification override:[/] "
+                        "No supported GitHub remote was found. "
+                        "Continuing because "
+                        "--allow-unverified-repository was provided."
+                    )
+
+
+            if not args.dry_run:
+                worktree_preflight = check_worktree()
+
+                if worktree_preflight.status == "not_repository":
+                    console.print(
+                        "[red bold]Git worktree required:[/] "
+                        "Real Issue repair must run inside "
+                        "a Git worktree."
+                    )
+                    console.print(
+                        "Run DevPilot from the target Git repository, "
+                        "or use --dry-run for read-only analysis."
+                    )
+                    sys.exit(1)
+
+                if (
+                    worktree_preflight.status == "dirty"
+                    and not args.resume_workflow
+                ):
+                    console.print(
+                        "[red bold]Clean worktree required:[/] "
+                        "Real Issue repair cannot start while "
+                        "the current Git worktree has "
+                        "uncommitted changes."
+                    )
+
+                    for change in worktree_preflight.changes:
+                        console.print(
+                            f"  [yellow]{change}[/yellow]"
+                        )
+
+                    console.print(
+                        "Commit, stash, or discard these changes "
+                        "before starting the repair."
+                    )
+                    sys.exit(1)
+                if args.resume_workflow:
+                    try:
+                        workflow_checkpoint = load_workflow_checkpoint(
+                            checkpoint_path
+                        )
+                    except FileNotFoundError:
+                        console.print(
+                            "[red bold]Workflow checkpoint not found:[/] "
+                            "No saved checkpoint exists for "
+                            "the requested Issue."
+                        )
+                        sys.exit(1)
+                    except JSONDecodeError:
+                        console.print(
+                            "[red bold]Invalid workflow checkpoint:[/] "
+                            "Saved checkpoint contains invalid JSON."
+                        )
+                        sys.exit(1)
+
+
+                    if workflow_checkpoint.workflow_id != (
+                        f"{repository_preflight.target.full_name}"
+                        f"#{issue_task.issue_number}"
+                    ):
+                        console.print(
+                            "[red bold]Workflow checkpoint mismatch:[/] "
+                            "Saved checkpoint does not belong to "
+                            "the requested Issue."
+                        )
+                        sys.exit(1)
+                    if workflow_checkpoint.repair_base_branch is None:
+                        console.print(
+                            "[red bold]Invalid workflow checkpoint:[/] "
+                            "Saved checkpoint is missing the repair base branch."
+                        )
+                        sys.exit(1)
+                    current_branch = get_current_branch()
+
+                    if current_branch != workflow_checkpoint.repair_branch:
+                        console.print(
+                            "[red bold]Workflow branch mismatch:[/] "
+                            "Current Git branch does not match "
+                            "the saved repair branch."
+                        )
+                        sys.exit(1)
+
+                    repair_branch = workflow_checkpoint.repair_branch
+                    repair_base_branch = (
+                        workflow_checkpoint.repair_base_branch
+                    )
+                else:
+                    repair_base_branch = get_current_branch()
+                    repair_branch = create_repair_branch(
+                        issue_task
+                    )
+                    console.print(
+                        "[green bold]Repair branch created:[/] "
+                        f"[cyan]{repair_branch}[/cyan]"
+                    )
+            issue_prompt = build_issue_repair_prompt(
+                issue_task,
+                dry_run=args.dry_run,
+            )
+
+        except (
+            GitHubIssueReferenceError,
+            GitHubIssueFetchError,
+            IssueWorkflowError,
+            RepositoryGuardError,
+            RepairBranchError,
+        ) as error:
+            console.print(
+                f"[red bold]Issue workflow error:[/] {error}"
+            )
+            sys.exit(1)
     config = Config.from_env()
 
     # CLI args override env vars
@@ -70,7 +430,20 @@ def main():
         temperature=config.temperature,
         max_tokens=config.max_tokens,
     )
-    agent = Agent(llm=llm, max_context_tokens=config.max_context_tokens)
+    agent_tools = None
+
+    if args.issue:
+        agent_tools = _tools_for_issue_workflow(
+            dry_run=args.dry_run,
+        )
+
+    agent = Agent(
+        llm=llm,
+        tools=agent_tools,
+        max_context_tokens=config.max_context_tokens,
+        permission_policy=ToolPermissionPolicy(),
+        request_tool_approval=_request_tool_approval,
+    )
 
     # resume saved session
     if args.resume:
@@ -86,7 +459,399 @@ def main():
             console.print(f"[red]Session '{args.resume}' not found.[/red]")
             sys.exit(1)
 
-    # one-shot mode
+    # GitHub Issue workflow mode
+    if args.issue:
+        assert issue_task is not None
+        assert issue_prompt is not None
+        assert repository_preflight is not None
+        mode = "dry run" if args.dry_run else "repair"
+
+        issue_number = (
+            f"#{issue_task.issue_number}"
+            if issue_task.issue_number is not None
+            else "unknown number"
+        )
+
+        repository_status = repository_preflight.status
+
+        console.print(
+            Panel(
+                (
+                    f"[bold]{issue_task.title}[/bold]\n"
+                    f"Issue: [cyan]{issue_number}[/cyan]\n"
+                    f"Repository: "
+                    f"[cyan]{repository_preflight.target.full_name}[/cyan]\n"
+                    f"Preflight: [cyan]{repository_status}[/cyan]\n"
+                    f"Mode: [cyan]{mode}[/cyan]"
+                ),
+                title="DevPilot Issue Workflow",
+                border_style="blue",
+            )
+        )
+
+        if args.dry_run:
+            run_issue_workflow(
+                issue_prompt=issue_prompt,
+                dry_run=True,
+                run_agent=lambda prompt: _run_once(
+                    agent,
+                    prompt,
+                ),
+            )
+        else:
+            assert repair_branch is not None
+            assert repair_base_branch is not None
+            assert issue_task.issue_number is not None
+
+            def create_pull_request_with_push_output(
+                repair_push,
+            ):
+                console.print()
+                console.print(
+                    "[green bold]Repair branch pushed[/]"
+                )
+                console.print(
+                    "[bold]Remote:[/] "
+                    f"[cyan]{repair_push.remote}[/cyan]"
+                )
+                console.print(
+                    "[bold]Branch:[/] "
+                    f"[cyan]{repair_push.branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_push.commit_sha}[/cyan]"
+                )
+
+                repair_pull_request = create_repair_pull_request(
+                    repository_preflight.target.full_name,
+                    issue_task.issue_number,
+                    issue_task.title,
+                    repair_push,
+                    repair_base_branch,
+                )
+
+                console.print()
+                console.print(
+                    "[green bold]Repair pull request created[/]"
+                )
+                console.print(
+                    "[bold]Pull request:[/] "
+                    f"[cyan]#{repair_pull_request.number}[/cyan]"
+                )
+                console.print(
+                    "[bold]URL:[/] "
+                    f"[cyan]{repair_pull_request.url}[/cyan]"
+                )
+                console.print(
+                    "[bold]Base:[/] "
+                    f"[cyan]{repair_pull_request.base_branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Head:[/] "
+                    f"[cyan]{repair_pull_request.head_branch}[/cyan]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_pull_request.commit_sha}[/cyan]"
+                )
+
+                return repair_pull_request
+
+            def build_ci_failure_prompt_with_logs(
+                ci_status,
+            ):
+                check_logs = {}
+
+                for check_run in ci_status.check_runs:
+                    if check_run.conclusion == "success":
+                        continue
+
+                    try:
+                        check_logs[check_run.name] = fetch_repair_check_log(
+                            ci_status.repository,
+                            check_run,
+                        )
+                    except RepairCIStatusError as error:
+                        console.print(
+                            "[yellow bold]"
+                            "Repair CI log warning:"
+                            "[/] "
+                            f"{error}"
+                        )
+
+                return build_repair_ci_failure_prompt(
+                    ci_status,
+                    check_logs=check_logs,
+                )
+            def print_repair_ci_status(
+                ci_status,
+                *,
+                title,
+            ):
+                console.print()
+                console.print(
+                    f"[green bold]{title}[/]"
+                )
+                console.print(
+                    "[bold]State:[/] "
+                    f"[cyan]{ci_status.state}[/cyan]"
+                )
+                console.print(
+                    "[bold]Check runs:[/]"
+                )
+
+                if ci_status.check_runs:
+                    for check_run in ci_status.check_runs:
+                        conclusion = (
+                            check_run.conclusion
+                            if check_run.conclusion is not None
+                            else "-"
+                        )
+
+                        console.print(
+                            "  "
+                            f"[cyan]{check_run.name}[/cyan]: "
+                            f"{check_run.status} / "
+                            f"{conclusion}"
+                        )
+
+                        if check_run.details_url is not None:
+                            console.print(
+                                "    "
+                                "[bold]URL:[/] "
+                                f"[cyan]{check_run.details_url}[/cyan]"
+                            )
+                else:
+                    console.print(
+                        "  [dim]No check runs found[/dim]"
+                    )
+            def wait_for_ci_with_output(
+                pull_request,
+            ):
+                ci_status = wait_for_repair_ci_status(
+                    pull_request.repository,
+                    pull_request.commit_sha,
+                )
+
+                print_repair_ci_status(
+                    ci_status,
+                    title="Repair CI status",
+                )
+
+                return ci_status
+            def wait_for_retry_ci_with_output(
+                repair_push,
+            ):
+                ci_status = wait_for_repair_ci_status(
+                    repository_preflight.target.full_name,
+                    repair_push.commit_sha,
+                )
+
+                print_repair_ci_status(
+                    ci_status,
+                    title="Repair CI retry status",
+                )
+
+                return ci_status
+
+
+
+            def save_checkpoint_to_disk(checkpoint):
+                checkpoint_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+                save_workflow_checkpoint(
+                    checkpoint,
+                    checkpoint_path,
+                )
+
+
+            try:
+                workflow_result = run_issue_workflow(
+                    issue_prompt=issue_prompt,
+                    dry_run=False,
+                    run_agent=lambda prompt: _run_once(
+                        agent,
+                        prompt,
+                    ),
+                    repair_branch=repair_branch,
+                    repair_base_branch=repair_base_branch,
+                    checkpoint=workflow_checkpoint,
+                    workflow_id=(
+                        f"{repository_preflight.target.full_name}"
+                        f"#{issue_task.issue_number}"
+                    ),
+                    save_checkpoint=save_checkpoint_to_disk,
+                    collect_summary=collect_post_repair_summary,
+                    run_validation=run_post_repair_validation,
+                    request_commit_approval=_request_commit_approval,
+                    create_commit=lambda: create_repair_commit(
+                        issue_task.issue_number,
+                        issue_task.title,
+                    ),
+                    push_commit=push_repair_branch,
+                    create_pull_request=create_pull_request_with_push_output,
+                    wait_for_ci=wait_for_ci_with_output,
+                    build_ci_failure_prompt=build_ci_failure_prompt_with_logs,
+                    wait_for_retry_ci=wait_for_retry_ci_with_output,
+                )
+            except PostRepairSummaryError as error:
+                console.print(
+                    "[red bold]Post-repair summary error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except PostRepairValidationError as error:
+                console.print(
+                    "[red bold]"
+                    "Post-repair validation error:"
+                    "[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairCommitError as error:
+                console.print(
+                    "[red bold]Repair commit error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairPushError as error:
+                console.print(
+                    "[red bold]Repair push error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairPullRequestError as error:
+                console.print(
+                    "[red bold]Repair pull request error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except RepairCIStatusError as error:
+                console.print(
+                    "[red bold]Repair CI status error:[/] "
+                    f"{error}"
+                )
+                sys.exit(1)
+            except ValueError as error:
+                if str(error) == "CI repair produced no repository changes":
+                    console.print(
+                        "[red bold]"
+                        "CI repair produced no repository changes."
+                        "[/]"
+                    )
+                    sys.exit(1)
+
+                if str(error) == "CI retry failed":
+                    sys.exit(1)
+
+                raise
+            if workflow_result is not None:
+                post_repair_summary = workflow_result.summary
+
+                console.print()
+                console.print(
+                    "[bold]Post-repair summary[/bold]"
+                )
+                console.print(
+                    "[bold]Repair branch:[/] "
+                    f"[cyan]{post_repair_summary.branch}[/cyan]"
+                )
+
+                if post_repair_summary.has_changes:
+                    console.print(
+                        "[bold]Changed files:[/]"
+                    )
+
+                    for change in post_repair_summary.changes:
+                        console.print(
+                            f"  [yellow]{change}[/yellow]"
+                        )
+                else:
+                    console.print(
+                        "[yellow]"
+                        "No repository changes were produced."
+                        "[/yellow]"
+                    )
+
+            if (
+                workflow_result is not None
+                and workflow_result.validation is not None
+            ):
+                post_repair_validation = workflow_result.validation
+
+                validation_command = " ".join(
+                    post_repair_validation.command
+                )
+                validation_style = (
+                    "green"
+                    if post_repair_validation.passed
+                    else "red"
+                )
+
+                console.print()
+                console.print(
+                    "[bold]Post-repair validation[/bold]"
+                )
+                console.print(
+                    "[bold]Command:[/] "
+                    f"[cyan]{validation_command}[/cyan]"
+                )
+                console.print(
+                    "[bold]Status:[/] "
+                    f"[{validation_style}]"
+                    f"{post_repair_validation.status}"
+                    f"[/{validation_style}]"
+                )
+                console.print(
+                    "[bold]Passed:[/] "
+                    f"{post_repair_validation.passed_count}"
+                )
+
+                if post_repair_validation.failed_count:
+                    console.print(
+                        "[bold]Failed:[/] "
+                        f"{post_repair_validation.failed_count}"
+                    )
+
+                if post_repair_validation.error_count:
+                    console.print(
+                        "[bold]Errors:[/] "
+                        f"{post_repair_validation.error_count}"
+                    )
+
+                if not post_repair_validation.passed:
+                    sys.exit(1)
+
+            if (
+                workflow_result is not None
+                and workflow_result.commit is not None
+            ):
+                repair_commit = workflow_result.commit
+
+                console.print()
+                console.print(
+                    "[green bold]Repair commit created[/]"
+                )
+                console.print(
+                    "[bold]Commit:[/] "
+                    f"[cyan]{repair_commit.sha}[/cyan]"
+                )
+                console.print(
+                    "[bold]Message:[/] "
+                    f"{repair_commit.message}"
+                )
+
+
+
+            return
+
+        return
+
+
+    # one-shot prompt mode
     if args.prompt:
         _run_once(agent, args.prompt)
         return
@@ -266,5 +1031,65 @@ def _show_help():
 
 
 def _brief(kwargs: dict, maxlen: int = 80) -> str:
-    s = ", ".join(f"{k}={repr(v)[:40]}" for k, v in kwargs.items())
-    return s[:maxlen] + ("..." if len(s) > maxlen else "")
+    """Format tool keyword arguments for a compact terminal preview.
+
+    Each value's repr is capped at ~40 characters.  Long string reprs are
+    shortened with an ellipsis while preserving both opening and closing
+    quotes so the preview never shows an orphaned quote character.
+    The final result is further trimmed to *maxlen*.
+    """
+    parts = []
+    for k, v in kwargs.items():
+        r = repr(v)
+        # Safely truncate long string reprs so the closing quote is kept
+        if len(r) > 40:
+            q = r[0]
+            if q in ("'", '"') and r[-1] == q:
+                inner = r[1:-1]
+                target = 40 - len(q) * 2 - 3  # room for q + inner + ... + q
+                if target > 0 and len(inner) > target:
+                    r = q + inner[:target] + "..." + q
+        parts.append(f"{k}={r}")
+
+    s = ", ".join(parts)
+
+    if len(s) <= maxlen:
+        return s
+
+    if maxlen <= 0:
+        return ""
+
+    if maxlen <= 3:
+        return "..."[:maxlen]
+
+    kept_parts = []
+
+    for part in parts:
+        full_preview = ", ".join([*kept_parts, part])
+
+        if len(full_preview) <= maxlen:
+            kept_parts.append(part)
+            continue
+
+        # The complete value does not fit. Preserve the argument name
+        # without cutting through its repr or leaving an open quote.
+        key, _, _ = part.partition("=")
+        shortened_part = f"{key}=..."
+        shortened_preview = ", ".join([*kept_parts, shortened_part])
+
+        if len(shortened_preview) <= maxlen:
+            return shortened_preview
+
+        # If even key=... does not fit, preserve as many earlier complete
+        # arguments as possible and mark the omitted remainder.
+        while kept_parts:
+            omitted_preview = ", ".join([*kept_parts, "..."])
+
+            if len(omitted_preview) <= maxlen:
+                return omitted_preview
+
+            kept_parts.pop()
+
+        return "..."[:maxlen]
+
+    return s

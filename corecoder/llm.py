@@ -29,6 +29,7 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    model: str | None = None
 
     @property
     def message(self) -> dict:
@@ -80,6 +81,33 @@ _PRICING = {
     "kimi-k2.5": (0.6, 3),
 }
 
+def get_model_pricing(
+    model: str,
+) -> tuple[float, float] | None:
+    """Return input/output USD pricing per million tokens."""
+    return _PRICING.get(model)
+
+def estimate_cost_usd(
+    model: str,
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> float | None:
+    """Estimate one model response cost in USD."""
+    if prompt_tokens < 0:
+        raise ValueError("prompt_tokens must be non-negative")
+
+    if completion_tokens < 0:
+        raise ValueError("completion_tokens must be non-negative")
+
+    pricing = get_model_pricing(model)
+    if pricing is None:
+        return None
+
+    input_rate, output_rate = pricing
+
+    return prompt_tokens * input_rate / 1_000_000 + completion_tokens * output_rate / 1_000_000
+
 
 class LLM:
     def __init__(
@@ -97,14 +125,18 @@ class LLM:
 
     @property
     def estimated_cost(self) -> float | None:
-        """Rough cost estimate in USD. Returns None if model not in pricing table."""
-        pricing = _PRICING.get(self.model)
-        if not pricing:
-            return None
-        input_rate, output_rate = pricing
+        """Rough cost estimate in USD."""
+        return estimate_cost_usd(
+            self.model,
+            prompt_tokens=self.total_prompt_tokens,
+            completion_tokens=self.total_completion_tokens,
+        )
+
+    @property
+    def routable_models(self) -> tuple[str, ...]:
+        """Return models this backend may use for one request."""
         return (
-            self.total_prompt_tokens * input_rate / 1_000_000
-            + self.total_completion_tokens * output_rate / 1_000_000
+            self.model,
         )
 
     def chat(
@@ -188,6 +220,7 @@ class LLM:
             tool_calls=parsed,
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
+            model=self.model,
         )
 
     def _call_with_retry(self, params: dict, max_retries: int = 3):
@@ -308,6 +341,7 @@ class LiteLLM(LLM):
             tool_calls=parsed,
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
+            model=self.model,
         )
 
     def _call_with_retry(self, params: dict, max_retries: int = 3):

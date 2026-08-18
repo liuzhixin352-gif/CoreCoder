@@ -2,11 +2,13 @@
 
 from pathlib import Path
 from .base import Tool
+from ..permissions import ToolPermission
 from .edit import _changed_files
 
 
 class WriteFileTool(Tool):
     name = "write_file"
+    permission = ToolPermission.WRITE
     description = (
         "Create a new file or completely overwrite an existing one. "
         "For small edits to existing files, prefer edit_file instead."

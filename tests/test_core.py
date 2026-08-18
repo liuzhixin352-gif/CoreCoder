@@ -16,7 +16,7 @@ def test_public_api_exports():
     assert Agent is not None
     assert LLM is not None
     assert Config is not None
-    assert len(ALL_TOOLS) == 7
+    assert len(ALL_TOOLS) == 12
 
 
 def test_config_from_env(monkeypatch):
@@ -26,6 +26,9 @@ def test_config_from_env(monkeypatch):
 
 
 def test_config_defaults(monkeypatch):
+    # This test checks code defaults, so local .env settings must not affect it.
+    monkeypatch.setattr("corecoder.config._load_dotenv", lambda: None)
+
     # clear relevant env vars without leaking the change into other tests
     monkeypatch.delenv("CORECODER_MODEL", raising=False)
     monkeypatch.delenv("CORECODER_MAX_TOKENS", raising=False)
@@ -44,6 +47,16 @@ def test_estimate_tokens():
     assert t > 0
     assert t < 100
 
+def test_context_budget_reserves_tokens_for_model_output():
+    ctx = ContextManager(
+        max_tokens=1000,
+        reserved_output_tokens=200,
+    )
+
+    assert ctx.input_budget == 800
+    assert ctx._snip_at == 400
+    assert ctx._summarize_at == 560
+    assert ctx._collapse_at == 720
 
 def test_context_snip():
     ctx = ContextManager(max_tokens=3000)
@@ -175,6 +188,189 @@ def test_write_tracks_changed_files(tmp_path):
 
 # --- Agent tool execution ---
 
+
+def test_exec_tools_parallel_runs_concurrently_and_preserves_order():
+    import threading
+    import time
+
+    from corecoder.tools.base import Tool
+
+    barrier = threading.Barrier(2)
+
+    class _SlowTool(Tool):
+        name = "slow"
+        description = "slow test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            barrier.wait(timeout=1)
+            time.sleep(0.05)
+            return "slow-result"
+
+    class _FastTool(Tool):
+        name = "fast"
+        description = "fast test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            barrier.wait(timeout=1)
+            return "fast-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowTool(), _FastTool()],
+    )
+
+    class _TC:
+        def __init__(self, name, tool_call_id):
+            self.name = name
+            self.id = tool_call_id
+            self.arguments = {}
+
+    tool_calls = [
+        _TC("slow", "1"),
+        _TC("fast", "2"),
+    ]
+
+    assert agent._exec_tools_parallel(tool_calls) == [
+        "slow-result",
+        "fast-result",
+    ]
+def test_exec_tools_parallel_uses_async_tool_execution():
+    from corecoder.tools.base import Tool
+
+    class _AsyncTool(Tool):
+        name = "async_tool"
+        description = "async test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            raise AssertionError("sync execute should not be used")
+
+        async def aexecute(self):
+            return "async-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_AsyncTool()],
+    )
+
+    class _TC:
+        name = "async_tool"
+        id = "1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "async-result",
+    ]
+
+def test_exec_tools_parallel_times_out_slow_async_tool():
+    import asyncio
+
+    from corecoder.tools.base import Tool
+
+    class _SlowAsyncTool(Tool):
+        name = "slow_async"
+        description = "slow async test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-result"
+
+        async def aexecute(self):
+            await asyncio.sleep(0.2)
+            return "async-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowAsyncTool()],
+        tool_timeout=0.05,
+    )
+
+    class _TC:
+        name = "slow_async"
+        id = "1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error executing slow_async: timed out after 0.05 seconds",
+    ]
+def test_exec_tools_parallel_timeout_does_not_cancel_siblings():
+    import asyncio
+
+    from corecoder.tools.base import Tool
+
+    class _SlowTool(Tool):
+        name = "slow"
+        description = "slow tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-slow"
+
+        async def aexecute(self):
+            await asyncio.sleep(0.2)
+            return "slow-result"
+
+    class _FastTool(Tool):
+        name = "fast"
+        description = "fast tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-fast"
+
+        async def aexecute(self):
+            await asyncio.sleep(0)
+            return "fast-result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowTool(), _FastTool()],
+        tool_timeout=0.05,
+    )
+
+    class _TC:
+        def __init__(self, name, tool_call_id):
+            self.name = name
+            self.id = tool_call_id
+            self.arguments = {}
+
+    tool_calls = [
+        _TC("slow", "1"),
+        _TC("fast", "2"),
+    ]
+
+    assert agent._exec_tools_parallel(tool_calls) == [
+        "Error executing slow: timed out after 0.05 seconds",
+        "fast-result",
+    ]
+
+
 def test_agent_tool_scope_is_per_instance():
     """An Agent restricted to a subset of tools must not resolve tools outside it."""
     only_read = [get_tool("read_file")]
@@ -187,7 +383,37 @@ def test_agent_tool_scope_is_per_instance():
         arguments = {"command": "echo hi"}
 
     assert "unknown tool 'bash'" in agent._exec_tool(_TC())
+def test_agent_executes_mcp_tool_through_existing_tool_interface(
+    tmp_path,
+):
+    from corecoder.mcp_tools import create_mcp_server
+    from corecoder.tools.mcp import load_mcp_tools
 
+    target = tmp_path / "example.txt"
+    target.write_text(
+        "hello from agent through MCP",
+        encoding="utf-8",
+    )
+
+    server = create_mcp_server(
+        repository_root=tmp_path
+    )
+    tools = load_mcp_tools(server)
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=tools,
+    )
+
+    class _TC:
+        name = "read_repository_file"
+        id = "mcp-1"
+        arguments = {"path": "example.txt"}
+
+    assert (
+        agent._exec_tool(_TC())
+        == "hello from agent through MCP"
+    )
 
 def test_exec_tool_distinguishes_bad_args_from_internal_error():
     """A TypeError raised inside a tool must not be reported as bad arguments."""
@@ -231,3 +457,2885 @@ def test_interrupt_backfills_missing_tool_replies():
     ids = [m["tool_call_id"] for m in replies]
     assert sorted(ids) == ["a", "b"]
     assert ids.count("a") == 1  # the already-answered call wasn't duplicated
+
+def test_agent_accepts_tracer():
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.tracer is tracer
+def test_agent_emits_permission_trace_before_allowed_tool_execution():
+    from corecoder.permissions import (
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _ReadTool(Tool):
+        name = "read_test"
+        description = "test read tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        permission = ToolPermission.READ
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_ReadTool()],
+        tracer=tracer,
+        permission_policy=ToolPermissionPolicy(),
+    )
+
+    class _TC:
+        name = "read_test"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.permission",
+        "tool.started",
+        "tool.completed",
+    ]
+
+    permission = tracer.events[0]
+
+    assert permission.timestamp > 0
+    assert permission.attributes == {
+        "tool_name": "read_test",
+        "tool_call_id": "call-1",
+        "permission": "read",
+        "decision": "allow",
+        "approval": None,
+    }
+
+def test_agent_traces_rejected_approval_without_starting_tool():
+    from corecoder.permissions import (
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+        async def aexecute(self):
+            self.executed = True
+            return "done"
+
+    def _reject(request):
+        return False
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        tracer=tracer,
+        permission_policy=ToolPermissionPolicy(),
+        request_tool_approval=_reject,
+    )
+
+    class _TC:
+        name = "write_test"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error: approval rejected for tool 'write_test'",
+    ]
+
+    assert tool.executed is False
+
+    assert [event.name for event in tracer.events] == [
+        "tool.permission",
+    ]
+
+    permission = tracer.events[0]
+
+    assert permission.attributes == {
+        "tool_name": "write_test",
+        "tool_call_id": "call-1",
+        "permission": "write",
+        "decision": "ask",
+        "approval": "rejected",
+    }
+
+def test_agent_traces_denied_permission_without_starting_tool():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _ExecuteTool(Tool):
+        name = "execute_test"
+        description = "test execute tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        permission = ToolPermission.EXECUTE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+        async def aexecute(self):
+            self.executed = True
+            return "done"
+
+    class _DenyPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.DENY
+
+    tool = _ExecuteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        tracer=tracer,
+        permission_policy=_DenyPolicy(),
+    )
+
+    class _TC:
+        name = "execute_test"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error: permission denied for tool 'execute_test'",
+    ]
+
+    assert tool.executed is False
+
+    assert [event.name for event in tracer.events] == [
+        "tool.permission",
+    ]
+
+    permission = tracer.events[0]
+
+    assert permission.attributes == {
+        "tool_name": "execute_test",
+        "tool_call_id": "call-1",
+        "permission": "execute",
+        "decision": "deny",
+        "approval": None,
+    }
+
+def test_all_registered_tools_have_expected_permissions():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools import ALL_TOOLS
+
+    expected = {
+        "bash": ToolPermission.EXECUTE,
+        "read_file": ToolPermission.READ,
+        "write_file": ToolPermission.WRITE,
+        "edit_file": ToolPermission.WRITE,
+        "glob": ToolPermission.READ,
+        "grep": ToolPermission.READ,
+        "agent": ToolPermission.EXECUTE,
+        "run_tests": ToolPermission.EXECUTE,
+        "repo_map": ToolPermission.READ,
+        "code_search": ToolPermission.READ,
+        "parse_issue": ToolPermission.READ,
+        "fetch_issue": ToolPermission.READ,
+    }
+
+    actual = {
+        tool.name: tool.permission
+        for tool in ALL_TOOLS
+    }
+
+    assert actual == expected
+    assert ToolPermission.UNKNOWN not in actual.values()
+
+
+def test_agent_emits_tool_started_trace():
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            assert tracer.events[0].name == "tool.started"
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+
+    class _TC:
+        name = "example"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+    event = tracer.events[0]
+
+    assert event.name == "tool.started"
+    assert event.timestamp > 0
+    assert event.attributes == {
+        "tool_name": "example",
+        "tool_call_id": "call-1",
+    }
+
+def test_agent_emits_tool_completed_trace_with_duration():
+    import asyncio
+
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            await asyncio.sleep(0)
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+
+    class _TC:
+        name = "example"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.started",
+        "tool.completed",
+    ]
+
+    completed = tracer.events[1]
+
+    assert completed.timestamp > 0
+    assert completed.attributes["tool_name"] == "example"
+    assert completed.attributes["tool_call_id"] == "call-1"
+    assert completed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_tool_failed_trace():
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _FailingTool(Tool):
+        name = "failing"
+        description = "failing test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            raise RuntimeError("boom")
+
+        async def aexecute(self):
+            raise RuntimeError("boom")
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_FailingTool()],
+        tracer=tracer,
+    )
+
+    class _TC:
+        name = "failing"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error executing failing: boom",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.started",
+        "tool.failed",
+    ]
+
+    failed = tracer.events[1]
+
+    assert failed.attributes["tool_name"] == "failing"
+    assert failed.attributes["tool_call_id"] == "call-1"
+    assert failed.attributes["error_type"] == "RuntimeError"
+    assert failed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_tool_timed_out_trace():
+    import asyncio
+
+    from corecoder.tracing import InMemoryTracer
+    from corecoder.tools.base import Tool
+
+    tracer = InMemoryTracer()
+
+    class _SlowTool(Tool):
+        name = "slow"
+        description = "slow test tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "sync-result"
+
+        async def aexecute(self):
+            await asyncio.sleep(0.2)
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_SlowTool()],
+        tracer=tracer,
+        tool_timeout=0.05,
+    )
+
+    class _TC:
+        name = "slow"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "Error executing slow: timed out after 0.05 seconds",
+    ]
+
+    assert [event.name for event in tracer.events] == [
+        "tool.started",
+        "tool.timed_out",
+    ]
+
+    timed_out = tracer.events[1]
+
+    assert timed_out.attributes["tool_name"] == "slow"
+    assert timed_out.attributes["tool_call_id"] == "call-1"
+    assert timed_out.attributes["timeout_seconds"] == 0.05
+    assert timed_out.attributes["duration_ms"] >= 0
+
+def test_agent_emits_llm_started_and_completed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    llm_events = [
+        event
+        for event in tracer.events
+        if event.name.startswith("llm.")
+    ]
+
+    assert [event.name for event in llm_events] == [
+        "llm.started",
+        "llm.completed",
+    ]
+
+    started = llm_events[0]
+    completed = llm_events[1]
+
+    assert started.attributes["round"] == 1
+    assert completed.attributes["round"] == 1
+    assert completed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_llm_failed_trace():
+    import pytest
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FailingLLM:
+        def chat(self, **kwargs):
+            raise RuntimeError("boom")
+
+    agent = Agent(
+        llm=_FailingLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        agent.chat("hello")
+
+    llm_events = [
+        event
+        for event in tracer.events
+        if event.name.startswith("llm.")
+    ]
+
+    assert [event.name for event in llm_events] == [
+        "llm.started",
+        "llm.failed",
+    ]
+
+    failed = llm_events[1]
+
+    assert failed.attributes["round"] == 1
+    assert failed.attributes["error_type"] == "RuntimeError"
+    assert failed.attributes["duration_ms"] >= 0
+
+def test_agent_emits_started_and_completed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    assert [event.name for event in tracer.events] == [
+        "agent.started",
+        "context.managed",
+        "llm.started",
+        "llm.completed",
+        "agent.completed",
+    ]
+
+    started = tracer.events[0]
+    completed = tracer.events[-1]
+
+    assert "run_id" in started.attributes
+    assert completed.attributes["run_id"] == started.attributes["run_id"]
+    assert completed.attributes["duration_ms"] >= 0
+    assert completed.attributes["llm_rounds"] == 1
+
+def test_agent_emits_pre_llm_context_managed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    context_events = [
+        event
+        for event in tracer.events
+        if event.name == "context.managed"
+    ]
+
+    assert len(context_events) == 1
+
+    event = context_events[0]
+
+    assert event.attributes["phase"] == "pre_llm"
+    assert event.attributes["tokens_before"] == (
+        event.attributes["tokens_after"]
+    )
+    assert event.attributes["tokens_saved"] == 0
+    assert event.attributes["applied_layers"] == ()
+    assert event.attributes["high_priority_messages"] == 0
+    assert event.attributes["priority_preserved_messages"] == 0
+    assert "run_id" in event.attributes
+
+def test_agent_emits_post_tool_context_managed_trace():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                tool_call = SimpleNamespace(
+                    name="missing_tool",
+                    id="call-1",
+                    arguments={},
+                )
+                return SimpleNamespace(
+                    tool_calls=[tool_call],
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    content="",
+                )
+
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    assert agent.chat("hello") == "done"
+
+    context_events = [
+        event
+        for event in tracer.events
+        if event.name == "context.managed"
+    ]
+
+    assert len(context_events) == 2
+    assert context_events[0].attributes["phase"] == "pre_llm"
+    assert context_events[1].attributes["phase"] == "post_tool"
+    assert (
+        context_events[0].attributes["run_id"]
+        == context_events[1].attributes["run_id"]
+    )
+
+
+def test_agent_emits_completed_trace_when_max_rounds_reached():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            tool_call = SimpleNamespace(
+                name="missing_tool",
+                id="call-1",
+                arguments={},
+            )
+            return SimpleNamespace(
+                tool_calls=[tool_call],
+                message={
+                    "role": "assistant",
+                    "content": "",
+                },
+                content="",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+        max_rounds=2,
+    )
+
+    assert agent.chat("hello") == (
+        "(reached maximum tool-call rounds)"
+    )
+
+    assert tracer.events[-1].name == "agent.completed"
+    assert tracer.events[-1].attributes["llm_rounds"] == 2
+    assert tracer.events[-1].attributes["duration_ms"] >= 0
+
+def test_agent_emits_failed_trace_when_llm_fails():
+    import pytest
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FailingLLM:
+        def chat(self, **kwargs):
+            raise RuntimeError("boom")
+
+    agent = Agent(
+        llm=_FailingLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        agent.chat("hello")
+
+    assert [event.name for event in tracer.events] == [
+        "agent.started",
+        "context.managed",
+        "llm.started",
+        "llm.failed",
+        "agent.failed",
+    ]
+
+    failed = tracer.events[-1]
+
+    assert failed.attributes["error_type"] == "RuntimeError"
+    assert failed.attributes["llm_rounds"] == 1
+    assert failed.attributes["duration_ms"] >= 0
+
+def test_tracer_failure_does_not_break_agent():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import TraceEvent, Tracer
+
+    class _FailingTracer(Tracer):
+        def emit(self, event: TraceEvent) -> None:
+            raise RuntimeError("tracer broke")
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=_FailingTracer(),
+    )
+
+    assert agent.chat("hello") == "done"
+
+def test_tracer_failure_does_not_break_tool_execution():
+    from corecoder.tracing import TraceEvent, Tracer
+    from corecoder.tools.base import Tool
+
+    class _FailingTracer(Tracer):
+        def emit(self, event: TraceEvent) -> None:
+            raise RuntimeError("tracer broke")
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "result"
+
+        async def aexecute(self):
+            return "result"
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_Tool()],
+        tracer=_FailingTracer(),
+    )
+
+    class _TC:
+        name = "example"
+        id = "call-1"
+        arguments = {}
+
+    assert agent._exec_tools_parallel([_TC()]) == [
+        "result",
+    ]
+
+def test_agent_trace_events_share_run_id_per_chat():
+    from types import SimpleNamespace
+
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+
+    agent.chat("first")
+
+    first_run_ids = {
+        event.attributes["run_id"]
+        for event in tracer.events
+    }
+
+    assert len(first_run_ids) == 1
+
+    first_run_id = next(iter(first_run_ids))
+
+    tracer.events.clear()
+
+    agent.chat("second")
+
+    second_run_ids = {
+        event.attributes["run_id"]
+        for event in tracer.events
+    }
+
+    assert len(second_run_ids) == 1
+    assert next(iter(second_run_ids)) != first_run_id
+
+def test_agent_clears_active_run_id_when_tool_execution_is_interrupted():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from corecoder.tools.base import Tool
+
+    class _InterruptingTool(Tool):
+        name = "interrupting"
+        description = "interrupting tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            raise KeyboardInterrupt
+
+        async def aexecute(self):
+            raise KeyboardInterrupt
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[
+                    SimpleNamespace(
+                        name="interrupting",
+                        id="call-1",
+                        arguments={},
+                    )
+                ],
+                message={
+                    "role": "assistant",
+                    "content": "",
+                },
+                content="",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[_InterruptingTool()],
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        agent.chat("hello")
+
+    assert agent._active_run_id is None
+
+def test_context_budget_rejects_reserved_output_at_or_above_window():
+    import pytest
+    with pytest.raises(
+        ValueError,
+        match="reserved_output_tokens must be less than max_tokens",
+    ):
+        ContextManager(
+            max_tokens=1000,
+            reserved_output_tokens=1000,
+        )
+
+
+def test_context_budget_rejects_negative_reserved_output():
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="reserved_output_tokens must be non-negative",
+    ):
+        ContextManager(
+            max_tokens=1000,
+            reserved_output_tokens=-1,
+        )
+
+def test_context_manager_records_compression_metrics():
+    ctx = ContextManager(max_tokens=2000)
+
+    messages = []
+    for i in range(20):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 200,
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"t{i}",
+                "content": "b\n" * 1000,
+            }
+        )
+
+    before = estimate_tokens(messages)
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    metrics = ctx.last_metrics
+
+    assert metrics.tokens_before == before
+    assert metrics.tokens_after == estimate_tokens(messages)
+    assert metrics.tokens_saved == (
+        metrics.tokens_before - metrics.tokens_after
+    )
+    assert metrics.tokens_saved > 0
+
+def test_context_manager_records_metrics_without_compression():
+    ctx = ContextManager(max_tokens=2000)
+
+    messages = [
+        {
+            "role": "user",
+            "content": "short message",
+        }
+    ]
+
+    before = estimate_tokens(messages)
+
+    assert ctx.maybe_compress(messages, None) is False
+
+    metrics = ctx.last_metrics
+
+    assert metrics.tokens_before == before
+    assert metrics.tokens_after == before
+    assert metrics.tokens_saved == 0
+    assert metrics.applied_layers == ()
+
+def test_context_metrics_records_applied_compression_layers():
+    ctx = ContextManager(max_tokens=3000)
+
+    messages = [
+        {
+            "role": "tool",
+            "tool_call_id": "t1",
+            "content": "line\n" * 2000,
+        }
+    ]
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert ctx.last_metrics.applied_layers == (
+        "tool_snip",
+    )
+
+
+def test_context_manager_exposes_recent_message_preservation_policy():
+    ctx = ContextManager(
+        max_tokens=2000,
+        keep_recent_messages=6,
+    )
+
+    assert ctx.keep_recent_messages == 6
+
+def test_context_summarization_uses_recent_message_policy():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=6,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"msg {i} " + "a" * 200,
+        }
+        for i in range(12)
+    ]
+
+    expected_recent = [
+        message["content"]
+        for message in messages[-6:]
+    ]
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert len(messages) == 8
+    assert [
+        message["content"]
+        for message in messages[-6:]
+    ] == expected_recent
+
+def test_context_manager_rejects_non_positive_keep_recent_messages():
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="keep_recent_messages must be greater than 0",
+    ):
+        ContextManager(
+            max_tokens=1000,
+            keep_recent_messages=0,
+        )
+
+def test_context_summarization_trigger_follows_recent_message_policy():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=6,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"msg {i} " + "a" * 250,
+        }
+        for i in range(9)
+    ]
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert "summarize" in ctx.last_metrics.applied_layers
+    assert len(messages) == 8
+
+def test_context_summarization_preserves_high_priority_message():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": "Never modify production credentials.",
+            "context_priority": "high",
+        }
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"old msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert any(
+        message.get("content")
+        == "Never modify production credentials."
+        for message in messages
+    )
+
+def test_agent_full_messages_strips_context_engineering_metadata():
+    agent = Agent(
+        llm=None,
+        tools=[],
+    )
+
+    agent.messages.append(
+        {
+            "role": "user",
+            "content": "Never modify production credentials.",
+            "context_priority": "high",
+        }
+    )
+
+    full_messages = agent._full_messages()
+
+    assert agent.messages[0]["context_priority"] == "high"
+    assert "context_priority" not in full_messages[1]
+
+def test_context_preserves_high_priority_tool_result_with_tool_call():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"old msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    tool_index = next(
+        i
+        for i, message in enumerate(messages)
+        if message.get("tool_call_id") == "call-1"
+    )
+
+    assert messages[tool_index - 1]["role"] == "assistant"
+    assert messages[tool_index - 1]["tool_calls"][0]["id"] == "call-1"
+
+def test_context_preserves_entire_tool_group_when_one_result_is_high_priority():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Ordinary file contents.",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"old msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assistant_index = next(
+        i
+        for i, message in enumerate(messages)
+        if {
+            tool_call.get("id")
+            for tool_call in message.get("tool_calls", [])
+        }
+        == {"call-1", "call-2"}
+    )
+
+    assert messages[assistant_index + 1]["tool_call_id"] == "call-1"
+    assert messages[assistant_index + 2]["tool_call_id"] == "call-2"
+
+def test_hard_collapse_preserves_high_priority_message():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    critical_content = (
+        "Never modify production credentials. "
+        + "critical " * 300
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": critical_content,
+            "context_priority": "high",
+        }
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert any(
+        message.get("content") == critical_content
+        for message in messages
+    )
+
+def test_hard_collapse_preserves_high_priority_tool_group():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Ordinary file contents.",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": (
+                "Critical repository state. "
+                + "critical " * 300
+            ),
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assistant_index = next(
+        i
+        for i, message in enumerate(messages)
+        if {
+            tool_call.get("id")
+            for tool_call in message.get("tool_calls", [])
+        }
+        == {"call-1", "call-2"}
+    )
+
+    assert messages[assistant_index + 1]["tool_call_id"] == "call-1"
+    assert messages[assistant_index + 2]["tool_call_id"] == "call-2"
+
+def test_tool_snip_preserves_high_priority_tool_output():
+    ctx = ContextManager(
+        max_tokens=4000,
+        keep_recent_messages=4,
+    )
+
+    tool_output = "important line\n" * 500
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": tool_output,
+            "context_priority": "high",
+        },
+    ]
+
+    assert ctx.maybe_compress(messages, None) is False
+
+    assert messages[1]["content"] == tool_output
+
+def test_context_metrics_records_high_priority_messages_after_compression():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": "Never modify production credentials.",
+            "context_priority": "high",
+        }
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert ctx.last_metrics.high_priority_messages == 1
+
+def test_context_metrics_records_priority_preserved_messages():
+    ctx = ContextManager(
+        max_tokens=1000,
+        keep_recent_messages=4,
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "Ordinary file contents.",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    for i in range(10):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"msg {i} " + "a" * 250,
+            }
+        )
+
+    assert ctx.maybe_compress(messages, None) is True
+
+    assert ctx.last_metrics.high_priority_messages == 1
+    assert ctx.last_metrics.priority_preserved_messages == 3
+
+def test_tool_snip_preserves_entire_high_priority_tool_group():
+    ctx = ContextManager(
+        max_tokens=4000,
+        keep_recent_messages=4,
+    )
+
+    sibling_output = "ordinary sibling line\n" * 500
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "git_status",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": sibling_output,
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-2",
+            "content": "Critical repository state.",
+            "context_priority": "high",
+        },
+    ]
+
+    ctx.maybe_compress(messages, None)
+
+    assert messages[1]["content"] == sibling_output
+
+def test_eval_case_stores_name_and_prompt():
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+    )
+
+    assert case.name == "simple-answer"
+    assert case.prompt == "Reply with exactly: done"
+
+def test_eval_result_stores_case_outcome():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="simple-answer",
+        success=True,
+        output="done",
+    )
+
+    assert result.case_name == "simple-answer"
+    assert result.success is True
+    assert result.output == "done"
+
+def test_eval_result_stores_duration():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="simple-answer",
+        success=True,
+        output="done",
+        duration_ms=12.5,
+    )
+
+    assert result.duration_ms == 12.5
+
+def test_eval_case_stores_expected_output():
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    assert case.expected_output == "done"
+
+
+def test_eval_case_matches_expected_output():
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    assert case.matches("done") is True
+    assert case.matches("not done") is False
+
+def test_eval_case_matches_requires_expected_output():
+    import pytest
+
+    from corecoder.eval import EvalCase
+
+    case = EvalCase(
+        name="unscored-case",
+        prompt="Do the task",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="expected_output is required for exact matching",
+    ):
+        case.matches("done")
+
+def test_eval_runner_runs_case_and_records_success():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            assert prompt == "Reply with exactly: done"
+            return "done"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.case_name == "simple-answer"
+    assert result.success is True
+    assert result.output == "done"
+    assert result.duration_ms >= 0
+
+def test_eval_runner_records_failed_case():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            return "wrong answer"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.case_name == "simple-answer"
+    assert result.success is False
+    assert result.output == "wrong answer"
+    assert result.duration_ms >= 0
+
+def test_eval_runner_runs_multiple_cases_in_order():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            return {
+                "first prompt": "first",
+                "second prompt": "wrong",
+            }[prompt]
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    cases = [
+        EvalCase(
+            name="first",
+            prompt="first prompt",
+            expected_output="first",
+        ),
+        EvalCase(
+            name="second",
+            prompt="second prompt",
+            expected_output="second",
+        ),
+    ]
+
+    report = runner.run(cases)
+    results = report.results
+
+    assert [result.case_name for result in results] == [
+        "first",
+        "second",
+    ]
+    assert [result.success for result in results] == [
+        True,
+        False,
+    ]
+
+def test_eval_report_computes_success_rate():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="ok",
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=False,
+                output="wrong",
+            ),
+            EvalResult(
+                case_name="case-3",
+                success=True,
+                output="ok",
+            ),
+        ]
+    )
+
+    assert report.success_rate == 2 / 3
+
+def test_eval_report_computes_average_duration():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="ok",
+                duration_ms=10.0,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=False,
+                output="wrong",
+                duration_ms=30.0,
+            ),
+        ]
+    )
+
+    assert report.avg_duration_ms == 20.0
+
+def test_eval_report_handles_empty_results():
+    from corecoder.eval import EvalReport
+
+    report = EvalReport(results=[])
+
+    assert report.success_rate == 0.0
+    assert report.avg_duration_ms == 0.0
+
+def test_eval_runner_returns_report():
+    from corecoder.eval import EvalCase, EvalReport, EvalRunner
+
+    class _FakeAgent:
+        def chat(self, prompt):
+            return "done"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    cases = [
+        EvalCase(
+            name="simple-answer",
+            prompt="Reply with exactly: done",
+            expected_output="done",
+        )
+    ]
+
+    report = runner.run(cases)
+
+    assert isinstance(report, EvalReport)
+    assert len(report.results) == 1
+    assert report.results[0].success is True
+    assert report.success_rate == 1.0
+
+def test_eval_result_stores_llm_rounds():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="simple-answer",
+        success=True,
+        output="done",
+        llm_rounds=3,
+    )
+
+    assert result.llm_rounds == 3
+
+
+def test_eval_runner_records_llm_rounds_from_trace():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    case = EvalCase(
+        name="simple-answer",
+        prompt="Reply with exactly: done",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.llm_rounds == 1
+
+
+def test_eval_runner_llm_rounds_do_not_accumulate_across_cases():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _FakeLLM:
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    first = runner.run_case(
+        EvalCase(
+            name="first",
+            prompt="first prompt",
+            expected_output="done",
+        )
+    )
+    second = runner.run_case(
+        EvalCase(
+            name="second",
+            prompt="second prompt",
+            expected_output="done",
+        )
+    )
+
+    assert first.llm_rounds == 1
+    assert second.llm_rounds == 1
+
+def test_eval_result_stores_tool_calls():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="tool-case",
+        success=True,
+        output="done",
+        tool_calls=2,
+    )
+
+    assert result.tool_calls == 2
+
+def test_eval_runner_records_tool_calls_from_trace():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tools.base import Tool
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "tool result"
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                tool_call = SimpleNamespace(
+                    name="example",
+                    id="call-1",
+                    arguments={},
+                )
+                return SimpleNamespace(
+                    tool_calls=[tool_call],
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    content="",
+                )
+
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    case = EvalCase(
+        name="tool-case",
+        prompt="Use the example tool",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.success is True
+    assert result.llm_rounds == 2
+    assert result.tool_calls == 1
+
+def test_eval_runner_tool_calls_do_not_accumulate_across_cases():
+    from types import SimpleNamespace
+
+    from corecoder.agent import Agent
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tools.base import Tool
+    from corecoder.tracing import InMemoryTracer
+
+    tracer = InMemoryTracer()
+
+    class _Tool(Tool):
+        name = "example"
+        description = "example tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "tool result"
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+
+            if self.calls % 2 == 1:
+                tool_call = SimpleNamespace(
+                    name="example",
+                    id=f"call-{self.calls}",
+                    arguments={},
+                )
+                return SimpleNamespace(
+                    tool_calls=[tool_call],
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    content="",
+                )
+
+            return SimpleNamespace(
+                tool_calls=[],
+                message={
+                    "role": "assistant",
+                    "content": "done",
+                },
+                content="done",
+            )
+
+    agent = Agent(
+        llm=_FakeLLM(),
+        tools=[_Tool()],
+        tracer=tracer,
+    )
+    runner = EvalRunner(agent=agent)
+
+    first = runner.run_case(
+        EvalCase(
+            name="first",
+            prompt="first prompt",
+            expected_output="done",
+        )
+    )
+    second = runner.run_case(
+        EvalCase(
+            name="second",
+            prompt="second prompt",
+            expected_output="done",
+        )
+    )
+
+    assert first.tool_calls == 1
+    assert second.tool_calls == 1
+
+def test_eval_result_stores_context_tokens_saved():
+    from corecoder.eval import EvalResult
+
+    result = EvalResult(
+        case_name="context-case",
+        success=True,
+        output="done",
+        context_tokens_saved=120,
+    )
+
+    assert result.context_tokens_saved == 120
+
+def test_eval_runner_records_context_tokens_saved_from_trace():
+    import time
+
+    from corecoder.eval import EvalCase, EvalRunner
+    from corecoder.tracing import InMemoryTracer, TraceEvent
+
+    tracer = InMemoryTracer()
+
+    class _FakeAgent:
+        def __init__(self):
+            self.tracer = tracer
+
+        def chat(self, prompt):
+            tracer.emit(
+                TraceEvent(
+                    name="context.managed",
+                    timestamp=time.time(),
+                    attributes={
+                        "tokens_saved": 40,
+                    },
+                )
+            )
+            tracer.emit(
+                TraceEvent(
+                    name="context.managed",
+                    timestamp=time.time(),
+                    attributes={
+                        "tokens_saved": 80,
+                    },
+                )
+            )
+            return "done"
+
+    runner = EvalRunner(agent=_FakeAgent())
+
+    case = EvalCase(
+        name="context-case",
+        prompt="Do the task",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.context_tokens_saved == 120
+
+def test_eval_report_computes_average_context_tokens_saved():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                context_tokens_saved=100,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=True,
+                output="done",
+                context_tokens_saved=300,
+            ),
+        ]
+    )
+
+    assert report.avg_context_tokens_saved == 200.0
+
+def test_eval_report_computes_average_llm_rounds():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                llm_rounds=1,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=True,
+                output="done",
+                llm_rounds=3,
+            ),
+        ]
+    )
+
+    assert report.avg_llm_rounds == 2.0
+
+def test_eval_report_computes_average_tool_calls():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                tool_calls=1,
+            ),
+            EvalResult(
+                case_name="case-2",
+                success=True,
+                output="done",
+                tool_calls=3,
+            ),
+        ]
+    )
+
+    assert report.avg_tool_calls == 2.0
+
+def test_eval_runner_records_agent_exception():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _FailingAgent:
+        def chat(self, prompt):
+            raise RuntimeError("agent failed")
+
+    runner = EvalRunner(agent=_FailingAgent())
+
+    case = EvalCase(
+        name="failing-case",
+        prompt="Do the task",
+        expected_output="done",
+    )
+
+    result = runner.run_case(case)
+
+    assert result.case_name == "failing-case"
+    assert result.success is False
+    assert result.output == ""
+    assert result.error_type == "RuntimeError"
+    assert result.duration_ms >= 0
+
+def test_eval_runner_continues_after_failed_case():
+    from corecoder.eval import EvalCase, EvalRunner
+
+    class _Agent:
+        def chat(self, prompt):
+            if prompt == "fail":
+                raise RuntimeError("agent failed")
+            return "done"
+
+    runner = EvalRunner(agent=_Agent())
+
+    report = runner.run(
+        [
+            EvalCase(
+                name="failing-case",
+                prompt="fail",
+                expected_output="done",
+            ),
+            EvalCase(
+                name="passing-case",
+                prompt="pass",
+                expected_output="done",
+            ),
+        ]
+    )
+
+    assert len(report.results) == 2
+
+    assert report.results[0].success is False
+    assert report.results[0].error_type == "RuntimeError"
+
+    assert report.results[1].success is True
+    assert report.results[1].error_type is None
+
+    assert report.success_rate == 0.5
+
+def test_eval_report_serializes_to_dict():
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                duration_ms=10.0,
+                llm_rounds=2,
+                tool_calls=1,
+                context_tokens_saved=50,
+            )
+        ]
+    )
+
+    data = report.to_dict()
+
+    assert data["success_rate"] == 1.0
+    assert data["avg_duration_ms"] == 10.0
+    assert data["avg_llm_rounds"] == 2.0
+    assert data["avg_tool_calls"] == 1.0
+    assert data["avg_context_tokens_saved"] == 50.0
+
+    assert data["results"][0]["case_name"] == "case-1"
+    assert data["results"][0]["success"] is True
+
+def test_eval_report_serializes_to_json():
+    import json
+
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+                duration_ms=10.0,
+                llm_rounds=2,
+                tool_calls=1,
+                context_tokens_saved=50,
+            )
+        ]
+    )
+
+    payload = report.to_json()
+    data = json.loads(payload)
+
+    assert data["success_rate"] == 1.0
+    assert data["results"][0]["case_name"] == "case-1"
+    assert data["results"][0]["output"] == "done"
+
+def test_eval_report_saves_json_file(tmp_path):
+    import json
+
+    from corecoder.eval import EvalReport, EvalResult
+
+    report = EvalReport(
+        results=[
+            EvalResult(
+                case_name="case-1",
+                success=True,
+                output="done",
+            )
+        ]
+    )
+
+    path = tmp_path / "report.json"
+
+    report.save_json(path)
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    assert data["success_rate"] == 1.0
+    assert data["results"][0]["case_name"] == "case-1"
+
+def test_tool_permission_policy_allows_read_only_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.READ,
+    )
+
+    assert decision is PermissionDecision.ALLOW
+
+def test_tool_permission_policy_requires_approval_for_write_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.WRITE,
+    )
+
+    assert decision is PermissionDecision.ASK
+
+def test_tool_permission_policy_requires_approval_for_execute_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.EXECUTE,
+    )
+
+    assert decision is PermissionDecision.ASK
+
+def test_tool_permission_policy_requires_approval_for_unknown_tools():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    decision = policy.evaluate(
+        ToolPermission.UNKNOWN,
+    )
+
+    assert decision is PermissionDecision.ASK
+
+def test_read_file_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.read import ReadFileTool
+
+    tool = ReadFileTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_tool_defaults_to_unknown_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.base import Tool
+
+    class _UnclassifiedTool(Tool):
+        name = "unclassified"
+        description = "unclassified tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        def execute(self):
+            return "done"
+
+    tool = _UnclassifiedTool()
+
+    assert tool.permission is ToolPermission.UNKNOWN
+
+def test_mcp_tool_adapter_defaults_to_unknown_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.mcp import MCPToolAdapter
+
+    tool = MCPToolAdapter(
+        server=object(),
+        name="dynamic_tool",
+        description="dynamic MCP tool",
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+    )
+
+    assert tool.permission is ToolPermission.UNKNOWN
+
+def test_agent_accepts_permission_policy():
+    from corecoder.permissions import ToolPermissionPolicy
+
+    policy = ToolPermissionPolicy()
+
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[],
+        permission_policy=policy,
+    )
+
+    assert agent.permission_policy is policy
+
+def test_agent_evaluates_permission_policy_before_tool_execution():
+    import asyncio
+
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _ReadTool(Tool):
+        name = "read_test"
+        description = "test read tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.READ
+
+        def execute(self):
+            return "done"
+
+    class _RecordingPolicy(ToolPermissionPolicy):
+        def __init__(self):
+            self.permissions = []
+
+        def evaluate(self, permission):
+            self.permissions.append(permission)
+            return PermissionDecision.ALLOW
+
+    class _TC:
+        name = "read_test"
+        id = "1"
+        arguments = {}
+
+    policy = _RecordingPolicy()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[_ReadTool()],
+        permission_policy=policy,
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert result == "done"
+    assert policy.permissions == [ToolPermission.READ]
+
+def test_agent_does_not_execute_tool_when_permission_requires_approval():
+    import asyncio
+
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert tool.executed is False
+    assert result == "Error: approval required for tool 'write_test'"
+
+def test_agent_does_not_execute_tool_when_permission_is_denied():
+    import asyncio
+
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _ExecuteTool(Tool):
+        name = "execute_test"
+        description = "test execute tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.EXECUTE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _DenyPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.DENY
+
+    class _TC:
+        name = "execute_test"
+        id = "1"
+        arguments = {}
+
+    tool = _ExecuteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_DenyPolicy(),
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert tool.executed is False
+    assert result == "Error: permission denied for tool 'execute_test'"
+
+def test_agent_without_permission_policy_preserves_existing_tool_execution():
+    import asyncio
+
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+    )
+
+    result = asyncio.run(
+        agent._exec_tool_async(_TC())
+    )
+
+    assert result == "done"
+    assert tool.executed is True
+
+def test_sync_tool_execution_respects_permission_policy():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert tool.executed is False
+    assert result == "Error: approval required for tool 'write_test'"
+
+def test_write_file_tool_declares_write_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.write import WriteFileTool
+
+    tool = WriteFileTool()
+
+    assert tool.permission is ToolPermission.WRITE
+
+def test_edit_file_tool_declares_write_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.edit import EditFileTool
+
+    tool = EditFileTool()
+
+    assert tool.permission is ToolPermission.WRITE
+
+def test_bash_tool_declares_execute_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.bash import BashTool
+
+    tool = BashTool()
+
+    assert tool.permission is ToolPermission.EXECUTE
+
+def test_run_tests_tool_declares_execute_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.run_tests import RunTestsTool
+
+    tool = RunTestsTool()
+
+    assert tool.permission is ToolPermission.EXECUTE
+
+def test_grep_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.grep import GrepTool
+
+    tool = GrepTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_glob_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.glob_tool import GlobTool
+
+    tool = GlobTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_repo_map_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.repo_map import RepoMapTool
+
+    tool = RepoMapTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_parse_issue_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.parse_issue import ParseIssueTool
+
+    tool = ParseIssueTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_fetch_issue_tool_declares_read_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.fetch_issue import FetchIssueTool
+
+    tool = FetchIssueTool()
+
+    assert tool.permission is ToolPermission.READ
+
+def test_agent_tool_declares_execute_permission():
+    from corecoder.permissions import ToolPermission
+    from corecoder.tools.agent import AgentTool
+
+    tool = AgentTool()
+
+    assert tool.permission is ToolPermission.EXECUTE
+
+def test_agent_executes_ask_tool_when_approval_is_granted():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    approvals = []
+
+    def _approve(request):
+        approvals.append(request)
+        return True
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+        request_tool_approval=_approve,
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert result == "done"
+    assert tool.executed is True
+    assert len(approvals) == 1
+    assert approvals[0].tool_name == "write_test"
+    assert approvals[0].permission is ToolPermission.WRITE
+    assert approvals[0].arguments == {}
+
+def test_agent_does_not_execute_ask_tool_when_approval_is_rejected():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _WriteTool(Tool):
+        name = "write_test"
+        description = "test write tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.WRITE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _AskPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.ASK
+
+    class _TC:
+        name = "write_test"
+        id = "1"
+        arguments = {}
+
+    approvals = []
+
+    def _reject(request):
+        approvals.append(request)
+        return False
+
+    tool = _WriteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_AskPolicy(),
+        request_tool_approval=_reject,
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert tool.executed is False
+    assert result == "Error: approval rejected for tool 'write_test'"
+    assert len(approvals) == 1
+    assert approvals[0].tool_name == "write_test"
+    assert approvals[0].permission is ToolPermission.WRITE
+
+def test_agent_does_not_allow_approval_to_override_denied_permission():
+    from corecoder.permissions import (
+        PermissionDecision,
+        ToolPermission,
+        ToolPermissionPolicy,
+    )
+    from corecoder.tools.base import Tool
+
+    class _ExecuteTool(Tool):
+        name = "execute_test"
+        description = "test execute tool"
+        parameters = {
+            "type": "object",
+            "properties": {},
+        }
+        permission = ToolPermission.EXECUTE
+
+        def __init__(self):
+            self.executed = False
+
+        def execute(self):
+            self.executed = True
+            return "done"
+
+    class _DenyPolicy(ToolPermissionPolicy):
+        def evaluate(self, permission):
+            return PermissionDecision.DENY
+
+    class _TC:
+        name = "execute_test"
+        id = "1"
+        arguments = {}
+
+    approvals = []
+
+    def _approve(request):
+        approvals.append(request)
+        return True
+
+    tool = _ExecuteTool()
+    agent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[tool],
+        permission_policy=_DenyPolicy(),
+        request_tool_approval=_approve,
+    )
+
+    result = agent._exec_tool(_TC())
+
+    assert tool.executed is False
+    assert approvals == []
+    assert result == "Error: permission denied for tool 'execute_test'"
+
+def test_agent_tool_inherits_parent_permission_context(
+    monkeypatch,
+):
+    from corecoder.permissions import ToolPermissionPolicy
+    from corecoder.tools.agent import AgentTool
+
+    captured = {}
+
+    class _FakeChildAgent:
+        def chat(self, task):
+            captured["task"] = task
+            return "child result"
+
+    def _fake_agent(**kwargs):
+        captured["agent_kwargs"] = kwargs
+        return _FakeChildAgent()
+
+    monkeypatch.setattr(
+        "corecoder.agent.Agent",
+        _fake_agent,
+    )
+
+    policy = ToolPermissionPolicy()
+
+    def _approve(request):
+        return True
+
+    agent_tool = AgentTool()
+    parent = Agent(
+        llm=LLM.__new__(LLM),
+        tools=[agent_tool],
+        permission_policy=policy,
+        request_tool_approval=_approve,
+    )
+
+    result = agent_tool.execute("inspect the repository")
+
+    assert result == "[Sub-agent completed]\nchild result"
+    assert captured["task"] == "inspect the repository"
+    assert (
+        captured["agent_kwargs"]["permission_policy"]
+        is parent.permission_policy
+    )
+    assert (
+        captured["agent_kwargs"]["request_tool_approval"]
+        is parent.request_tool_approval
+    )

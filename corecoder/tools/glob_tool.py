@@ -1,11 +1,15 @@
 """File pattern matching."""
 
 from pathlib import Path
+
+from corecoder.permissions import ToolPermission
+
 from .base import Tool
 
 
 class GlobTool(Tool):
     name = "glob"
+    permission = ToolPermission.READ
     description = (
         "Find files matching a glob pattern. "
         "Supports ** for recursive matching (e.g. '**/*.py')."
