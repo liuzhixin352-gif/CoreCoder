@@ -78,6 +78,21 @@ class BudgetTracker:
         self.limits = limits
         self.usage = BudgetUsage()
 
+    @property
+    def remaining_cost_usd(
+        self,
+    ) -> float | None:
+        """Return remaining cost budget, if one is configured."""
+        limit = self.limits.max_cost_usd
+
+        if limit is None:
+            return None
+
+        return max(
+            0.0,
+            limit - self.usage.cost_usd,
+        )
+
     def record(
         self,
         *,

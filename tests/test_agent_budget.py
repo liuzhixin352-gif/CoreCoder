@@ -16,7 +16,15 @@ from corecoder.llm import (
 from corecoder.permissions import ToolPermission
 from corecoder.tools.base import Tool
 from corecoder.tracing import InMemoryTracer
-
+from corecoder.model_catalog import (
+    ModelCatalog,
+    ModelProfile,
+)
+from corecoder.model_router import (
+    CapabilityModelRouter,
+    RouteRequest,
+)
+from corecoder.routed_llm import RoutedLLM
 
 class FakeLLM:
     model = "gpt-4o-mini"
@@ -445,3 +453,187 @@ def test_agent_zero_token_budget_blocks_first_llm_call():
 
     assert exc_info.value.resource == "total_tokens"
     assert llm.calls == 0
+
+def test_agent_cost_uses_response_model():
+    class RoutedFakeLLM:
+        model = "gpt-4o"
+
+        @property
+        def routable_models(self):
+            return (
+                "gpt-4o",
+                "gpt-4o-mini",
+            )
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            del messages
+            del tools
+            del on_token
+
+            return LLMResponse(
+                content="fallback result",
+                prompt_tokens=1000,
+                completion_tokens=500,
+                model="gpt-4o-mini",
+            )
+
+    agent = Agent(
+        llm=RoutedFakeLLM(),
+        tools=[],
+        budget_limits=BudgetLimits(
+            max_cost_usd=0.001,
+        ),
+    )
+
+    result = agent.chat(
+        "hello",
+    )
+
+    assert result == "fallback result"
+
+    assert agent.last_budget_usage is not None
+    assert agent.last_budget_usage.cost_usd == pytest.approx(
+        0.00045,
+    )
+
+def test_agent_cost_budget_rejects_unpriced_routed_model():
+    class RoutedFakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        @property
+        def routable_models(self):
+            return (
+                "gpt-4o-mini",
+                "custom-unpriced-model",
+            )
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            del messages
+            del tools
+            del on_token
+
+            self.calls += 1
+
+            return LLMResponse(
+                content="must not run",
+            )
+
+    llm = RoutedFakeLLM()
+
+    agent = Agent(
+        llm=llm,
+        tools=[],
+        budget_limits=BudgetLimits(
+            max_cost_usd=1.0,
+        ),
+    )
+
+    with pytest.raises(
+        BudgetPricingUnavailableError,
+        match="custom-unpriced-model",
+    ):
+        agent.chat(
+            "hello",
+        )
+
+    assert llm.calls == 0
+
+def test_agent_reroutes_as_remaining_cost_budget_shrinks():
+    tool = CountingTool()
+
+    expensive = FakeLLM(
+        [
+            LLMResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="count",
+                        arguments={},
+                    )
+                ],
+                prompt_tokens=7800,
+                completion_tokens=0,
+            )
+        ]
+    )
+    expensive.model = "gpt-4o"
+
+    cheap = FakeLLM(
+        [
+            LLMResponse(
+                content="done",
+                prompt_tokens=1000,
+                completion_tokens=500,
+            )
+        ]
+    )
+    cheap.model = "gpt-4o-mini"
+
+    catalog = ModelCatalog(
+        [
+            ModelProfile(
+                name="gpt-4o",
+            ),
+            ModelProfile(
+                name="gpt-4o-mini",
+            ),
+        ]
+    )
+
+    routed_llm = RoutedLLM(
+        router=CapabilityModelRouter(
+            [
+                "gpt-4o",
+                "gpt-4o-mini",
+            ],
+            catalog,
+        ),
+        backends={
+            "gpt-4o": expensive,
+            "gpt-4o-mini": cheap,
+        },
+        route_request=RouteRequest(),
+    )
+
+    agent = Agent(
+        llm=routed_llm,
+        tools=[
+            tool,
+        ],
+        budget_limits=BudgetLimits(
+            max_cost_usd=0.020,
+        ),
+    )
+
+    result = agent.chat(
+        "use the tool and finish",
+    )
+
+    assert result == "done"
+
+    assert expensive.calls == 1
+    assert cheap.calls == 1
+    assert tool.calls == 1
+
+    assert agent.last_budget_usage is not None
+    assert agent.last_budget_usage.cost_usd == pytest.approx(
+        0.01995,
+    )
+
+    # Per-call routing context must not mutate
+    # the shared default request.
+    assert (
+        routed_llm.route_request.remaining_cost_usd
+        is None
+    )

@@ -29,6 +29,7 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    model: str | None = None
 
     @property
     def message(self) -> dict:
@@ -80,6 +81,11 @@ _PRICING = {
     "kimi-k2.5": (0.6, 3),
 }
 
+def get_model_pricing(
+    model: str,
+) -> tuple[float, float] | None:
+    """Return input/output USD pricing per million tokens."""
+    return _PRICING.get(model)
 
 def estimate_cost_usd(
     model: str,
@@ -94,7 +100,7 @@ def estimate_cost_usd(
     if completion_tokens < 0:
         raise ValueError("completion_tokens must be non-negative")
 
-    pricing = _PRICING.get(model)
+    pricing = get_model_pricing(model)
     if pricing is None:
         return None
 
@@ -124,6 +130,13 @@ class LLM:
             self.model,
             prompt_tokens=self.total_prompt_tokens,
             completion_tokens=self.total_completion_tokens,
+        )
+
+    @property
+    def routable_models(self) -> tuple[str, ...]:
+        """Return models this backend may use for one request."""
+        return (
+            self.model,
         )
 
     def chat(
@@ -207,6 +220,7 @@ class LLM:
             tool_calls=parsed,
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
+            model=self.model,
         )
 
     def _call_with_retry(self, params: dict, max_retries: int = 3):
@@ -327,6 +341,7 @@ class LiteLLM(LLM):
             tool_calls=parsed,
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
+            model=self.model,
         )
 
     def _call_with_retry(self, params: dict, max_retries: int = 3):

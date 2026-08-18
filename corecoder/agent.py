@@ -13,6 +13,7 @@ import asyncio
 import inspect
 import time
 
+from dataclasses import replace
 from collections.abc import Callable
 from uuid import uuid4
 from .tracing import TraceEvent, Tracer
@@ -22,7 +23,10 @@ from .tools import ALL_TOOLS
 from .tools.base import Tool
 from .tools.agent import AgentTool
 from .prompt import system_prompt
-from .context import ContextManager
+from .context import (
+    ContextManager,
+    estimate_tokens,
+)
 from .permissions import (
     PermissionDecision,
     ToolApprovalRequest,
@@ -35,7 +39,8 @@ from .budget import (
     BudgetTracker,
     BudgetUsage,
 )
-
+from .model_router import RouteRequest
+from .routed_llm import RouteAwareLLM
 
 class Agent:
     def __init__(
@@ -51,6 +56,7 @@ class Agent:
             Callable[[ToolApprovalRequest], bool] | None
         ) = None,
         budget_limits: BudgetLimits | None = None,
+        route_role: str | None = None,
     ):
         self.llm = llm
         self.tools = tools if tools is not None else ALL_TOOLS
@@ -66,6 +72,7 @@ class Agent:
         self.last_budget_usage: BudgetUsage | None = None
         self._active_run_id: str | None = None
         self._system = system_prompt(self.tools)
+        self.route_role = route_role
 
         # wire up sub-agent capability
         for t in self.tools:
@@ -87,6 +94,47 @@ class Agent:
             self.budget_limits,
         )
 
+    def _runtime_route_request(
+        self,
+        budget_tracker: BudgetTracker | None,
+        messages: list[dict],
+    ) -> RouteRequest | None:
+        """Build request-local routing context for one LLM round."""
+        if not isinstance(
+            self.llm,
+            RouteAwareLLM,
+        ):
+            return None
+
+        base_request = self.llm.route_request
+
+        remaining_cost_usd = (
+            base_request.remaining_cost_usd
+        )
+
+        if (
+            budget_tracker is not None
+            and budget_tracker.limits.max_cost_usd
+            is not None
+        ):
+            remaining_cost_usd = (
+                budget_tracker.remaining_cost_usd
+            )
+
+        role = base_request.role
+
+        if self.route_role is not None:
+            role = self.route_role
+
+        return replace(
+            base_request,
+            role=role,
+            remaining_cost_usd=remaining_cost_usd,
+            estimated_prompt_tokens=estimate_tokens(
+                messages,
+            ),
+        )
+
     def _validate_budget_pricing(
         self,
         budget_tracker: BudgetTracker | None,
@@ -98,24 +146,35 @@ class Agent:
         if budget_tracker.limits.max_cost_usd is None:
             return
 
-        model = getattr(
+        models = getattr(
             self.llm,
-            "model",
+            "routable_models",
             None,
         )
 
-        if (
-            not isinstance(model, str)
-            or estimate_cost_usd(
-                model,
-                prompt_tokens=0,
-                completion_tokens=0,
+        if models is None:
+            model = getattr(
+                self.llm,
+                "model",
+                None,
             )
-            is None
-        ):
-            raise BudgetPricingUnavailableError(
+            models = (
                 model,
             )
+
+        for model in models:
+            if (
+                not isinstance(model, str)
+                or estimate_cost_usd(
+                    model,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                )
+                is None
+            ):
+                raise BudgetPricingUnavailableError(
+                    model,
+                )
 
     def _record_budget_usage(
         self,
@@ -127,10 +186,17 @@ class Agent:
             return
 
         model = getattr(
-            self.llm,
+            response,
             "model",
             None,
         )
+
+        if model is None:
+            model = getattr(
+                self.llm,
+                "model",
+                None,
+            )
 
         cost_usd = None
 
@@ -139,6 +205,15 @@ class Agent:
                 model,
                 prompt_tokens=response.prompt_tokens,
                 completion_tokens=response.completion_tokens,
+            )
+
+        if (
+            budget_tracker.limits.max_cost_usd
+            is not None
+            and cost_usd is None
+        ):
+            raise BudgetPricingUnavailableError(
+                model,
             )
 
         budget_tracker.record(
@@ -278,11 +353,28 @@ class Agent:
                 )
 
             try:
-                resp = self.llm.chat(
-                    messages=self._full_messages(),
-                    tools=self._tool_schemas(),
-                    on_token=on_token,
+                llm_messages = self._full_messages()
+
+                route_request = (
+                    self._runtime_route_request(
+                        resolved_budget_tracker,
+                        llm_messages,
+                    )
                 )
+
+                if route_request is None:
+                    resp = self.llm.chat(
+                        messages=llm_messages,
+                        tools=self._tool_schemas(),
+                        on_token=on_token,
+                    )
+                else:
+                    resp = self.llm.chat(
+                        messages=llm_messages,
+                        tools=self._tool_schemas(),
+                        on_token=on_token,
+                        route_request=route_request,
+                    )
             except Exception as e:
                 if self.tracer is not None:
                     self._emit_trace(
@@ -352,6 +444,20 @@ class Agent:
             except ValueError:
                 self._active_run_id = None
                 raise
+
+            response_model = getattr(
+                resp,
+                "model",
+                None,
+            )
+
+            if response_model is None:
+                response_model = getattr(
+                    self.llm,
+                    "model",
+                    None,
+                )
+
             # no tool calls -> LLM is done, return text
             if not resp.tool_calls:
                 self.messages.append(resp.message)
@@ -367,6 +473,7 @@ class Agent:
                             )
                             * 1000,
                                 "llm_rounds": round_number,
+                                "model": response_model,
                             },
                         )
                     )
@@ -418,6 +525,7 @@ class Agent:
                         )
                         * 1000,
                         "llm_rounds": self.max_rounds,
+                        "model": response_model,
                     },
                 )
             )
