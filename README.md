@@ -2,68 +2,196 @@
 
 # CoreCoder
 
-**The nanoGPT of coding agents. 1,081 lines of pure Python — understand how a coding agent actually works, then fork your own.**
+**A production-oriented coding-agent runtime built from a minimal Python core.**
 
-*learn from it · fork it · ship something better*
+*tool safety · code retrieval · agent service · multi-agent orchestration · budgets · model routing · reproducible evaluation*
 
-[中文](README_CN.md) | English | [Source-reading series · 8 bilingual essays](article/00-index_EN.md)
+[中文](README_CN.md) | English | [Upstream source-reading series · 8 bilingual essays](article/00-index_EN.md)
 
-[![PyPI](https://img.shields.io/pypi/v/corecoder)](https://pypi.org/project/corecoder/)
+
 [![Python](https://img.shields.io/badge/python-3.10+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://github.com/he-yufeng/CoreCoder/actions/workflows/ci.yml/badge.svg)](https://github.com/he-yufeng/CoreCoder/actions)
-[![engine](https://img.shields.io/badge/engine-1081_LoC-blue)](article/00-index_EN.md)
-[![essays](https://img.shields.io/badge/source--reading-8_bilingual-orange)](article/00-index_EN.md)
+[![Tests](https://github.com/liuzhixin352-gif/CoreCoder/actions/workflows/ci.yml/badge.svg?branch=devpilot-v1)](https://github.com/liuzhixin352-gif/CoreCoder/actions)
 
 </div>
 
-- **Readable end to end.** Read the whole engine in an afternoon, with no magic hidden anywhere you can't follow it.
-- **Hackable.** Set a breakpoint on any line, change it, rerun, all on your own machine. It genuinely works, which makes this a living reference rather than a diagram.
-- **The gaps are the point.** It deliberately keeps only the minimal core; what's missing isn't half-finished, it's where you branch off and make it your own.
+- **End-to-end coding-agent workflow.** Fetch a GitHub Issue, inspect the repository, plan and execute a repair, validate it, commit it, push a branch, open a pull request, and react to CI failures.
+- **Production-style runtime controls.** Tool permissions, human approval boundaries, checkpoint/resume, tracing, context management, token/cost budgets, and capability-aware model fallback are explicit runtime policies rather than hidden framework behavior.
+- **Interviewable architecture.** The orchestration, retrieval, multi-agent roles, budget enforcement, routing, evaluation, and failure boundaries are implemented directly in Python so each engineering trade-off can be explained from code.
 
-## How it compares
+## What this fork adds
 
-| | CoreCoder | Claude Code | aider | nanoGPT |
-|---|---|---|---|---|
-| Lines of code | ~1,081 engine / 1,714 total | hundreds of thousands (closed) | tens of thousands of Python | ~600 (two files) |
-| Time to read it all | one afternoon | can't (closed) | a few days of slogging | one afternoon |
-| Breakpoint, change, rerun? | yes, every line | no | yes, but there's a lot | yes |
-| What it's for | understand one, then fork your own | production coding assistant | terminal pair-programming | minimal GPT for teaching |
+CoreCoder started from a deliberately small coding-agent core. This fork extends that core into a production-oriented agent runtime while keeping the major control paths explicit.
 
-The nanoGPT column is there as a reference point: minimal, readable, but it teaches you to train a GPT. CoreCoder is after the same thing, only the subject is an agent that actually edits code. Sitting it next to Claude Code and aider isn't about competing for their users. CoreCoder is the foundation you stand on while you learn from them and get going; it isn't in the same race.
+| Area | Added in this fork |
+|---|---|
+| GitHub repair workflow | Issue ingestion, repository verification, dedicated repair branches, validation, commits, pushes, pull requests, CI monitoring, and one CI-driven repair retry |
+| Runtime safety | Tool permission policy, read/write/execute classification, approval boundaries, repository/worktree safety |
+| Orchestration | Extracted workflow orchestration, explicit state machine, checkpoint/resume, human-in-the-loop boundaries |
+| Tool ecosystem | Structured repository, code-search, test, and issue tools plus a separate MCP server adapter |
+| Runtime | Bounded asynchronous tool execution, structured tracing, and context engineering |
+| Retrieval | Repository Code RAG with reproducible retrieval evaluation |
+| Service layer | FastAPI agent service |
+| Multi-agent | Planner → Coder → Reviewer workflow with isolated role permissions |
+| Resource control | Per-run and shared token/cost budgets |
+| Model runtime | Capability-aware routing, transient fallback, streaming safety, budget-aware rerouting, role-specific model policies |
+| Evaluation | Reproducible evaluation and deterministic benchmark infrastructure covering success, latency, rounds, tool calls, tokens, and dollar cost |
 
 ## What this is
 
-I've always felt coding agents get talked about as if they were arcane. Strip a tool like Claude Code or Cursor all the way down and the core is a `while` loop wrapped around a large model, plus seven or eight tools that let it actually do things. The hard part was never the loop; it's everything the loop has to cope with once it meets the real world. CoreCoder is the minimal version that writes that core out honestly.
+CoreCoder is a coding-agent runtime built to make the difficult parts of agent engineering visible: not just the model/tool loop, but the safety, state, retrieval, observability, cost, routing, and recovery policies around it.
 
-The engine (loop, model interface, context, tools, sessions) is 1,081 lines once you drop blank lines and comments. Counting the outer CLI, config and packaging too, the whole package is 18 files: 1,714 physical lines, 1,385 net, every one short enough to read in a single sitting.
+The central loop is still intentionally understandable: send context to a model, execute requested tools, append the results, and continue until the model returns a final answer. The project then layers explicit production concerns around that loop instead of delegating them to a large agent framework.
 
-And it really runs: reads and writes files, executes shell, spawns sub-agents, compacts context in three tiers, and tells you the tokens and dollars a run burned whenever you ask. 86 tests, all green. But the point of it running isn't to become your daily driver. It runs so the walkthrough can't lie: a reference that shows how an agent works has to actually work.
+The result is deliberately framework-light. CoreCoder does not use LangChain, LangGraph, AutoGen, or CrewAI as its orchestration runtime. The agent loop, state transitions, permission policy, multi-agent workflow, budget tracking, routing, tracing, and evaluation contracts are implemented directly in Python. Model access remains replaceable through OpenAI-compatible and LiteLLM-backed clients.
 
-The code came out of a public teardown: open analyses have already exposed a lot of the load-bearing architecture inside production agents like Claude Code. I took the most essential layer and rewrote it honestly, in as little code as I could. So reading CoreCoder is roughly like reading a runnable, annotated take on how that kind of agent works, except it's only a minimal reimplementation, sitting right there on your machine for you to take apart and change.
+The project is intended as both a working engineering system and an interview artifact: each subsystem has tests around its failure boundaries, and the architecture is small enough to explain from request entry to tool execution, fallback, budget enforcement, and final evaluation.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/he-yufeng/CoreCoder/main/assets/demo_en.png" width="760"
+  <img src="assets/demo_en.png" width="760"
        alt="A real CoreCoder run: corecoder -p asks it to fix buggy.py; the agent reads the file, edits the code, runs it to confirm, and reports what it changed.">
 </p>
 
-<p align="center"><sub><i>These thousand lines really do run a full loop end to end: ask it to fix buggy.py and it reads the file, edits the code, runs it once to confirm, then reports back on its own. Watch it, then come back and read the code.</i></sub></p>
+<p align="center"><sub><i>A minimal CLI repair loop: the agent reads code, edits it, validates the result, and returns a final answer.</i></sub></p>
 
-This README follows the same arc: the first half helps you **read it** (the code map, the main loop, eight essays), the second half helps you **fork it** and points at a few directions worth pushing further.
 
-## Run it once first (five minutes before you read)
+## Architecture
 
-Before you read the source, get it running on your machine once to build some intuition. It's a foundation meant for forking, so the recommended path is to clone it and install editable, reading and changing as you go:
+```text
+                  CLI / FastAPI / GitHub Issue
+                            │
+                            ▼
+                 Workflow / Service Layer
+                            │
+                            ▼
+                          Agent
+          ┌─────────────────┼──────────────────┐
+          │                 │                  │
+       Context            Tools             Tracing
+          │                 │
+          │         ┌───────┼────────┐
+          │         │       │        │
+          │       Files   Tests   Code Search
+          │                          │
+          │                          ▼
+          │                       Code RAG
+          │
+          ├──────────────┐
+          │              │
+          ▼              ▼
+ Permission Policy   BudgetTracker
+      + HITL              │
+                          ▼
+                       RoutedLLM
+                  ┌───────┴────────┐
+                  │                │
+             Model Router     Model Catalog
+                  │
+         capability / cost / role
+                  │
+                  ▼
+          transient fallback
+                  │
+                  ▼
+            Model backend(s)
+
+
+Planner ─┐
+Coder   ─┼── role-specific tools and routing
+Reviewer─┘
+         │
+         └── shared workflow budget
+
+
+MCP server adapter
+      │
+      └── separate external tool surface
+
+
+                    Eval / Benchmark
+          success · latency · rounds · tools
+                 · tokens · dollar cost
+```
+
+
+### Key boundaries
+
+- **Permissions are checked before tool execution.** Read-only operations can be allowed automatically, while write and execute operations pass through explicit policy decisions and can require human approval.
+- **Budgets are enforced independently of model routing.** Routing may choose a cheaper eligible model from estimated remaining cost, but the `BudgetTracker` remains the hard post-response enforcement boundary.
+- **Fallback is selective.** Transient provider failures may move to the next eligible model; bad requests, permission failures, budget failures, and other non-retryable errors do not.
+- **Streaming fallback is conservative.** Once text has already been emitted to the user, CoreCoder does not silently retry another model and risk duplicated output.
+- **Role routing is request-local.** Planner, Coder, and Reviewer can share one routed runtime without mutating shared routing state.
+- **Actual cost follows the actual model.** When fallback changes the winning backend, accounting uses the model attached to that response rather than the originally selected wrapper.
+
+
+## Engineering trade-offs
+
+The project intentionally makes several choices that are useful to discuss in a system-design interview:
+
+- **Custom runtime over a large agent framework.** More code is owned locally, but execution semantics and failure boundaries remain visible and testable.
+- **Fail closed for unknown pricing under a cost budget.** A model without known pricing cannot silently bypass cost enforcement.
+- **Estimated cost for routing, actual cost for enforcement.** Estimates guide model selection; provider response usage determines the final budget update.
+- **Shared budget across multi-agent roles.** Planner, Coder, Reviewer, and revision rounds compete for one workflow-level resource envelope instead of receiving independent hidden budgets.
+- **Fallback only before streamed output.** Reliability does not come at the cost of corrupting already-visible responses.
+- **Deterministic evaluation before live-model benchmarking.** Runtime correctness can be tested cheaply and reproducibly; model-quality evaluation can be layered on separately.
+
+## Deterministic runtime benchmark
+
+CoreCoder includes a small deterministic benchmark for exercising runtime
+contracts without API calls or model variance.
+
+Both targets run through the real `corecoder.Agent` runtime. The LLM behavior
+is scripted and deterministic; the difference is that the baseline never
+uses tools, while the advanced target exercises the actual permission,
+tool-execution, tracing, and budget-accounting paths.
+
+| Target | Success | Direct response | Single tool | Two tools | Tokens | Cost |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline | 33.3% | PASS | FAIL | FAIL | 75 | $0.0003 |
+| Advanced | 100.0% | PASS | PASS | PASS | 125 | $0.0005 |
+
+The three versioned cases are:
+
+```text
+direct-response
+  1 LLM round
+  0 tool calls
+
+single-tool
+  2 LLM rounds
+  exactly 1 tool call
+
+tool-chain
+  exactly 2 tool calls
+```
+
+For the advanced target, tool calls are executed by the real CoreCoder Agent
+through its permission policy and asynchronous tool runtime. The resulting
+`tool.permission`, `tool.started`, and `tool.completed` events come from the
+production tracing path rather than being synthesized by the benchmark
+fixture.
+
+Token usage is deterministic test usage attached to the scripted LLM
+responses. Dollar cost is then calculated through CoreCoder's normal budget
+accounting using the project's pricing table.
+
+This benchmark measures **runtime behavior, not live-model coding quality**.
+It does not claim that CoreCoder solves 100% of real coding tasks or
+outperforms external coding agents. Live-model and repository-level coding
+quality remain a separate evaluation layer.
+
+
+## Quick start
+
+The current DevPilot runtime is developed on the `devpilot-v1` branch. Until the final release is promoted to `main`, clone that branch explicitly:
 
 ```bash
-git clone https://github.com/he-yufeng/CoreCoder
+git clone --branch devpilot-v1 --single-branch https://github.com/liuzhixin352-gif/CoreCoder
 cd CoreCoder
 pip install -e .
 ```
 
-If you just want to get it running first, `pip install corecoder` works too.
-
-Give it a model and a key and it goes. It speaks the OpenAI-compatible API by default, and switching providers is usually just two environment variables:
+CoreCoder uses an OpenAI-compatible client by default. Configure a model and API key with environment variables:
 
 | Provider | Example env vars |
 |---|---|
@@ -71,133 +199,147 @@ Give it a model and a key and it goes. It speaks the OpenAI-compatible API by de
 | DeepSeek | `OPENAI_API_KEY=sk-... OPENAI_BASE_URL=https://api.deepseek.com CORECODER_MODEL=deepseek-chat` |
 | Local Ollama | `OPENAI_API_KEY=ollama OPENAI_BASE_URL=http://localhost:11434/v1 CORECODER_MODEL=qwen2.5-coder` |
 
-Kimi, Qwen and the like are the same two variables; for providers that don't even offer an OpenAI-compatible endpoint, the optional LiteLLM backend (`pip install "corecoder[litellm]"`) routes to a hundred-plus of them. The third essay goes into this in detail. The key can be `export`ed directly or dropped into a `.env` at the project root, which is loaded on startup. Then:
+Other OpenAI-compatible providers can use the same configuration pattern. For broader provider support, install the optional LiteLLM backend:
+
+```bash
+pip install -e ".[litellm]"
+```
+
+Then set `CORECODER_PROVIDER=litellm` in the environment or `.env` file.
+
+API keys can be exported directly or placed in a `.env` file. Then run either the interactive CLI or one-shot mode:
 
 ```bash
 corecoder                                             # interactive REPL
 corecoder -p "add error handling to parse_config()"   # one-shot mode, exits when done
 ```
 
+### HTTP service
+
+Install the service dependencies:
+
+```bash
+pip install -e ".[service]"
+```
+
+Start the FastAPI service:
+
+```bash
+corecoder-service
+```
+
+The service exposes:
+
+```text
+GET  /health
+POST /chat
+```
+
+A chat request contains a message and an optional session ID; the response includes the agent response, session ID, and run ID.
+
 ### DevPilot GitHub Issue workflow
 
-DevPilot can fetch a real GitHub Issue, verify the current repository,
-inspect the codebase, and run a structured repair workflow.
+DevPilot turns a GitHub Issue into a guarded repository repair workflow:
 
-DevPilot development uses GitHub Actions CI: every pull request targeting
-`devpilot-v1` automatically runs the project's CI workflow.
+```text
+GitHub Issue
+    ↓
+repository verification
+    ↓
+worktree safety check
+    ↓
+dedicated repair branch
+    ↓
+Agent repair
+    ↓
+local validation
+    ↓
+human commit approval
+    ↓
+commit → push → Pull Request
+    ↓
+GitHub Actions CI
+    ├── success → completed
+    └── failure → one bounded CI-driven repair retry
+```
 
-Start with a read-only dry run:
+#### Start with a read-only dry run
 
 ```bash
 corecoder --issue https://github.com/owner/repository/issues/12 --dry-run
 ```
 
-When the current repository is verified as the exact Issue repository or
-a same-name fork, run the real repair workflow with:
+Dry-run mode performs analysis without modifying the repository. Its tool
+profile is restricted to:
+
+```text
+read_file
+glob
+grep
+repo_map
+```
+
+It does not create a repair branch, run post-repair validation, create a
+commit, push code, or open a Pull Request.
+
+#### Repository and worktree safety
+
+For a real repair:
 
 ```bash
 corecoder --issue https://github.com/owner/repository/issues/12
 ```
 
-Repository verification follows these rules:
+Repository verification is fail-closed:
 
-| Repository status | Dry run | Real repair |
+| Repository status | Dry run | New real repair |
 |---|---|---|
 | `exact` | allowed | allowed |
 | `fork` | allowed | allowed |
 | `mismatch` | blocked | blocked |
-| `unknown` | allowed in read-only mode | blocked by default |
+| `unknown` | allowed read-only | blocked by default |
 
-Dry-run mode exposes only the read-only tools `read_file`, `glob`,
-`grep`, and `repo_map`.
-
-When the repository status is `unknown`, a real repair can proceed only
-after the user independently verifies the working directory and provides
-an explicit override:
+An `unknown` repository can be overridden only after independent
+verification:
 
 ```bash
 corecoder --issue https://github.com/owner/repository/issues/12 \
   --allow-unverified-repository
 ```
 
-The override applies only to an `unknown` repository. It cannot bypass a
-confirmed repository mismatch.
+The override does not bypass a confirmed mismatch.
 
-### Worktree safety
+A new real repair must also start inside a clean Git worktree. Existing
+uncommitted work is rejected so Issue changes cannot be mixed with unrelated
+local changes.
 
-A real repair also requires the current directory to be inside a Git
-worktree and the worktree to be clean. This prevents DevPilot from mixing
-an Issue repair with existing uncommitted work.
+#### Dedicated branch and workflow checkpoints
 
-| Worktree state | Dry run | Real repair |
-|---|---|---|
-| Clean Git worktree | allowed | allowed |
-| Dirty Git worktree | allowed in read-only mode | blocked |
-| Not a Git worktree | allowed in read-only mode | blocked |
-
-Before starting a real repair, this command should produce no output:
-
-```bash
-git status --short
-```
-
-Commit, stash, or discard existing changes before running the repair.
-`--allow-unverified-repository` does not bypass the Git worktree or
-cleanliness checks.
-
-### Dedicated repair branches
-
-After repository verification and the clean-worktree check succeed, every
-real Issue repair creates and switches to a dedicated Git branch before
-configuration, model, or Agent startup.
-
-Branch names use the Issue number and a normalized form of the title:
+A new real repair creates a dedicated branch before Agent execution:
 
 ```text
 devpilot/issue-21-fix-repository-scan-limit
 ```
 
-Branch names are limited to 80 characters. When a title contains no usable
-ASCII characters, DevPilot falls back to the Issue-number-only form:
+The workflow persists checkpoints as it moves through validation, approval,
+commit, push, Pull Request, and CI states.
 
-```text
-devpilot/issue-21
+To continue a previously checkpointed workflow:
+
+```bash
+corecoder --issue https://github.com/owner/repository/issues/12 \
+  --resume-workflow
 ```
 
-Dry-run mode does not create or switch branches. If the branch cannot be
-created, the repair stops before configuration or Agent startup.
+Resume mode requires the saved workflow to belong to the requested Issue and
+the current Git branch to match the saved repair branch. Resume mode is exempt
+from the clean-worktree start check so checkpointed uncommitted repair state
+can be continued; the checkpoint and branch identity checks still apply.
 
-### Post-repair summary
+#### Validation and human approval
 
-After a real Issue repair finishes, DevPilot inspects the Git worktree and
-prints the dedicated repair branch together with every changed or untracked
-file:
-
-```text
-Post-repair summary
-Repair branch: devpilot/issue-21-fix-repository-scan-limit
-Changed files:
-   M corecoder/cli.py
-  ?? tests/test_example.py
-```
-
-Git porcelain status prefixes are preserved so staged, unstaged, deleted,
-renamed, and untracked files remain distinguishable.
-
-When the Agent produces no repository changes, DevPilot reports:
-
-```text
-No repository changes were produced.
-```
-
-Dry-run mode skips this inspection because it must remain read-only. A Git
-inspection failure is reported as a post-repair summary error and returns a
-non-zero exit status.
-
-### Mandatory post-repair validation
-
-When a real Issue repair produces repository changes, DevPilot automatically
-runs the project test suite after printing the post-repair summary:
+When the Agent produces repository changes, DevPilot runs local validation
+before any commit is created:
 
 ```text
 Post-repair validation
@@ -206,246 +348,276 @@ Status: passed
 Passed: 275
 ```
 
-The validation runs only when all of the following are true:
+Failed, interrupted, invalid, empty, timed-out, or unstartable test runs stop
+the workflow with a non-zero exit status. The repair branch and current
+changes are preserved for inspection.
 
-- the workflow is a real repair rather than a dry run;
-- the Agent completed successfully;
-- the Git worktree contains repair changes.
-
-When no repository changes are produced, DevPilot skips validation. Dry-run
-mode also skips validation to remain read-only.
-
-A failed test run is reported with its available counts:
+After validation succeeds, the CLI presents the changed files and validation
+result and asks for explicit approval before creating the initial repair
+commit:
 
 ```text
-Post-repair validation
-Status: failed
-Passed: 10
-Failed: 2
+Commit approval required
+Approve commit? [approve/reject] >
 ```
 
-Failed, interrupted, invalid, or empty test runs return a non-zero process
-status. The repair branch and its uncommitted changes are preserved for
-inspection, and no repair commit is created.
+Rejecting approval stops the workflow before commit, push, or Pull Request
+creation.
 
-If pytest cannot be started or exceeds its execution timeout, DevPilot reports
-a post-repair validation error and exits with a non-zero status.
+#### Commit, push, and Pull Request
 
-### Automatic repair commits
-
-After mandatory validation succeeds, DevPilot stages the validated repair
-changes and creates a deterministic Git commit:
+After approval, DevPilot:
 
 ```text
-Repair commit created
-Commit: 0123456789abcdef0123456789abcdef01234567
-Message: Fix #21: Fix repository scan limit
+creates a repair commit with a deterministic message
+    ↓
+verifies and pushes the repair branch to origin
+    ↓
+opens a Pull Request against the branch
+that was checked out before the repair started
 ```
 
-The commit is created only when all of the following are true:
-
-- the workflow is a real repair rather than a dry run;
-- the Agent produced repository changes;
-- mandatory post-repair validation passed;
-- the GitHub Issue number is available.
-
-The commit message uses this format:
+The commit message uses:
 
 ```text
 Fix #<Issue number>: <Issue title>
 ```
 
-Whitespace in the Issue title is normalized. When the title is empty,
-DevPilot uses `GitHub Issue repair` as the fallback title.
+The Pull Request base is therefore not hard-coded to `main` or
+`devpilot-v1`; it follows the branch from which the repair workflow began.
 
-DevPilot runs `git add --all`, creates the commit, and reports its full SHA.
+#### CI monitoring and bounded repair
 
-If staging, committing, or reading the resulting commit SHA fails, DevPilot
-reports a repair commit error and exits with a non-zero status. The dedicated
-repair branch and its current Git state are preserved for inspection.
+After the Pull Request is created, DevPilot polls GitHub check runs for the
+repair commit. The default polling interval is 5 seconds with a 300-second
+timeout.
 
-### Automatic repair branch pushes
-
-After the validated repair commit is created, DevPilot verifies that the
-dedicated local repair branch still points to that exact commit and pushes
-the branch to `origin`:
+Final CI states are:
 
 ```text
-Repair branch pushed
-Remote: origin
-Branch: devpilot/issue-21-fix-repository-scan-limit
-Commit: 0123456789abcdef0123456789abcdef01234567
+success
+failure
 ```
 
-### Automatic repair pull requests
-
-After the validated repair branch is pushed successfully, DevPilot creates a
-GitHub Pull Request from the dedicated repair branch to the branch that was
-checked out before the repair started.
+If the first CI result is `failure`, DevPilot performs exactly one
+CI-driven repair attempt using failed check-run context:
 
 ```text
-Repair pull request created
-Pull request: #42
-URL: https://github.com/owner/repository/pull/42
-Base: devpilot-v1
-Head: devpilot/issue-21-fix-repository-scan-limit
-Commit: 0123456789abcdef0123456789abcdef01234567
+failed CI
+   ↓
+prepare bounded failure context
+   ↓
+Agent repair
+   ↓
+local validation
+   ↓
+new repair commit
+   ↓
+push same repair branch
+   ↓
+wait for CI again
 ```
 
-### Repair pull request CI status
+This retry is intentionally bounded to one attempt. A second CI failure, a
+retry that produces no repository changes, or a CI timeout terminates the
+workflow with a non-zero exit status.
 
-After creating the Pull Request, DevPilot waits for GitHub Actions CI to
-finish. It polls the latest GitHub check runs for the repair commit until
-they reach a final state. By default, it checks every 5 seconds for up to
-300 seconds.
+## Code map
+
+The runtime is split by responsibility rather than hidden behind a large
+agent framework. These are the main entry points for an architecture or
+system-design walkthrough:
+
+| Module | Responsibility |
+|---|---|
+| `agent.py` | Core model/tool loop plus permission, context, tracing, and budget integration |
+| `issue_orchestration.py` | Explicit GitHub Issue workflow state machine, checkpoints, resume, and CI-repair lifecycle |
+| `repository_guard.py` | Repository identity, Git worktree, and clean-start safety checks |
+| `repair_branch.py` | Dedicated repair branch creation |
+| `post_repair.py` / `post_repair_validation.py` | Change collection and mandatory local validation |
+| `repair_commit.py` / `repair_push.py` / `repair_pr.py` | Commit, push, and Pull Request lifecycle |
+| `repair_ci.py` | CI polling, bounded failure context, and one CI-driven repair retry |
+| `context.py` | Context estimation and compression |
+| `permissions.py` | Read/write/execute permission policy and approval decisions |
+| `tool_runtime.py` | Bounded asynchronous tool execution |
+| `code_rag.py` | Repository indexing and code retrieval |
+| `tools/` | Built-in file, shell, search, test, repository, code-search, issue, and sub-agent tools |
+| `mcp_tools.py` | Separate MCP server adapter |
+| `agent_service.py` / `service.py` | Session-aware Agent service and FastAPI entry point |
+| `multi_agent.py` | Planner → Coder → Reviewer orchestration and role-specific tool policies |
+| `budget.py` | Token and dollar-budget limits, usage, and enforcement |
+| `model_catalog.py` | Model capabilities and pricing metadata |
+| `model_router.py` | Capability-, role-, and budget-aware model selection |
+| `routed_llm.py` | Routed execution, transient fallback, response attribution, and streaming safety |
+| `tracing.py` | Structured runtime events |
+| `eval.py` | Evaluation metrics and report primitives |
+| `benchmark.py` | Versioned deterministic benchmark and multi-target comparison infrastructure |
+
+A useful reading path for the current fork is:
 
 ```text
-Repair CI status
-State: success
-Check runs:
-  tests: completed / success
-    URL: https://github.com/owner/repository/actions/runs/1
+request
+  ↓
+CLI / service / GitHub Issue workflow
+  ↓
+issue_orchestration.py
+  ↓
+agent.py
+  ├── context.py
+  ├── permissions.py
+  ├── tools/
+  │      └── code_search.py
+  ├── code_rag.py
+  ├── budget.py
+  └── routed_llm.py
+         ├── model_router.py
+         └── model_catalog.py
+  ↓
+tracing.py
+  ↓
+eval.py / benchmark.py
 ```
 
-The transient states `no_checks` and `pending` cause DevPilot to keep waiting.
-The final states are `success` and `failure`. If the first CI result is
-`failure`, DevPilot performs one automatic CI-driven repair attempt using the
-failed check-run details, validates the new changes locally, creates another
-repair commit, pushes it to the same repair branch, and waits for CI again on
-the updated Pull Request.
+## Runtime flow
 
-If the retry succeeds, the repair workflow finishes normally. If the retry
-fails, DevPilot displays the retry check-run details and exits with status
-code 1. If the CI-driven repair produces no repository changes, the workflow
-also exits with status code 1. If no final CI state is reached before the
-timeout, the repair workflow exits with a CI status error.
+The model/tool loop is still the center of CoreCoder, but most production
+behavior comes from the policies around that loop.
 
-## Read it: the code map
-
-Laid out flat, the whole project is this big. Skim it before you clone and you'll know where everything is. This is the most concrete difference from Claude Code's hundreds of thousands of lines: you can read it like the table of contents of a book. Start from the main loop in `agent.py`; that's the heart of the whole agent.
+For a normal Agent round:
 
 ```text
-corecoder/
-├── agent.py        agent loop + parallel tool exec       150 lines   ← start here
-├── llm.py          streaming client + retry + cost        336 lines
-├── context.py      three-tier context compaction          210 lines
-├── session.py      save / resume + path-traversal guard    97 lines
-├── prompt.py       system prompt                           33 lines
-├── cli.py          REPL + slash commands + one-shot       270 lines
-├── config.py       env-var config                          57 lines
-└── tools/
-    ├── bash.py       shell + dangerous-command gate + cd  127 lines
-    ├── edit.py       unique-match search/replace + diff    92 lines
-    ├── grep.py       content search                        79 lines
-    ├── glob_tool.py  filename matching                     47 lines
-    ├── read.py       file read                             53 lines
-    ├── write.py      file write                            38 lines
-    ├── agent.py      sub-agent spawning                    58 lines
-    └── base.py       tool base class                       27 lines
+user input
+   ↓
+context preparation
+   ↓
+budget pre-check
+   ↓
+model routing
+   ↓
+LLM response
+   ├── final text ─────────────────→ return
+   │
+   └── tool calls
+          ↓
+      permission policy
+          ↓
+      allow / ask / deny
+          ↓
+      bounded tool execution
+          ↓
+      append results
+          ↓
+      next model round
 ```
 
-Seven tools: `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, and `agent` (which spawns a sub-agent). Everything else is the CLI shell, config, and packaging wrapped around that engine core.
+For a GitHub Issue repair, that inner Agent loop runs inside the larger
+stateful repository workflow described above.
 
-## A `while` loop is the whole agent
+The separation is intentional:
 
-The whole of an agent fits in one sentence: hand the user's words to the model, run whatever tools it asks for, stuff the results back into the context, ask again, and keep going until it stops asking for tools and gives an answer. In code, that's about a dozen lines:
+```text
+Agent
+  owns model/tool interaction
 
-```python
-# corecoder/agent.py · the main loop (trimmed skeleton)
-def chat(self, user_input):
-    self.messages.append(user_input)
+Issue workflow
+  owns repository lifecycle, checkpoints,
+  validation, approval, Git operations, and CI recovery
 
-    for _ in range(self.max_rounds):                   # bounded, so it can't run away
-        reply = self.llm.chat(self.messages, self.tools)   # ask the model what to do next
-        if not reply.tool_calls:                       # model wants no more tools
-            return reply.text                          #   -> done, hand the answer back
-        results = run_parallel(reply.tool_calls)       # tools requested -> run in parallel
-        self.messages += results                       # feed results back, loop again
+BudgetTracker
+  owns hard resource enforcement
 
-    return "(hit the round limit)"
+Model router
+  owns model-selection policy
+
+Tracing / Eval / Benchmark
+  observe and measure runtime behavior
 ```
 
-That's the whole thing. The core skeleton is about twenty lines; counting parallel execution and the bookkeeping after a Ctrl+C interrupt, maybe forty. Almost everything else in CoreCoder's thousand-odd lines is there to clean up the mess the loop runs into once it meets the real world. `llm.py` ends up the biggest file in the project, not because calling a model is hard, but because a streamed response splinters each tool call's arguments into fragments you have to restitch in order, a provider will hand you half a JSON object or a null `usage` field, and 429s, timeouts, dropped connections and 5xx all need backoff-and-retry while the other 4xx should just raise. That unglamorous grunt work, not the loop, is where the real engineering of taking an agent from demo to delivery actually lives; the third essay follows it down to the line.
+This keeps failure boundaries explicit instead of making one object
+responsible for the entire system.
 
-Three decisions are worth a closer look, because they're the kind of call you can only make after you've understood how others did it, and they're judgments you can lift straight into your own fork.
+## Upstream source-reading series · 8 bilingual essays
 
-**`edit_file` does search-and-replace on a unique match, not line numbers.** Line numbers are a trap: the model only has to miscount by one and it quietly edits the wrong place. Anchor on a unique snippet of the original instead. If there's no match, it hands the start of the file back so the model can re-anchor; if there are several matches, it makes the model bring more surrounding context rather than gamble on one. On a successful edit it returns a diff. Recoverable on failure, verifiable on success: the whole loop stays inside the tool.
+The original CoreCoder project includes a bilingual source-reading series
+covering the minimal Agent core from which this fork started.
 
-**Context isn't cut all at once when it's full; it gives ground in three tiers, cheapest first.** At half full (50%) it trims over-long tool outputs in place, a tier that's purely mechanical and costs no model call. If 70% still isn't enough, it has the model summarize the older turns into a single paragraph while keeping the most recent ones verbatim. Only at 90% does it hit the emergency tier and pull everything, summary and recent turns alike, down to its tightest form. Blunt truncation tends to throw away exactly the early decision a long task leans on most; tiering lets it surrender the least important things first instead of lopping off the oldest decisions wholesale from the start.
-
-**You constrain a sub-agent by withholding the tool, not by writing rules and hoping it obeys.** A spawned sub-agent gets an isolated context and its own separate history, with a toolset exactly one item shorter than the parent's: the `agent` tool itself, so it can't recursively spawn more sub-agents. Handing it one fewer tool is cleaner than legislating a rule after the fact. It also reuses the parent's model connection (its spend folded into the same running total), truncates its output once it runs past 5,000 characters down to just the opening, and runs on a shorter round limit than the parent. The same restraint, end to end.
-
-Every one of these *whys* is traced down to the actual lines of code in the series below.
-
-## The source-reading series · 8 bilingual essays
-
-I also wrote a bilingual source-reading series, one intro plus seven parts, each in Chinese with an English mirror. Against CoreCoder's actual code, it walks through how agents like Claude Code work under the hood. One hard rule I set myself: every line count and every snippet is re-read and re-checked from the repo, never written from memory. The first six get you reading, the seventh gets you forking; read them in any order.
+The essays are still useful for understanding the foundational loop, tools,
+provider wrapper, context management, sessions, and sub-agent ideas. They
+describe the upstream teaching-oriented core rather than every subsystem in
+this fork, so the architecture and runtime sections above are the
+authoritative overview of the current project.
 
 - **[Intro · Read Claude Code through CoreCoder, then build your own](article/00-index_EN.md)**
-- **[01 · An agent, at its core, is a `while` loop](article/01-the-loop_EN.md)** — the main loop in `agent.py`, interrupts, and the round limit
-- **[02 · The tool system: letting the model act, safely](article/02-tools_EN.md)** — the seven tools in `tools/` and the bash safety gate
-- **[03 · Plug in any LLM, and keep the bill honest](article/03-llm-and-cost_EN.md)** — `llm.py`'s provider wrapper, retries, and cost accounting
-- **[04 · Surviving a long task on a finite window](article/04-context_EN.md)** — `context.py`'s three-tier compaction and orphaned tool messages
-- **[05 · Parallel execution and sub-agents](article/05-parallel-and-subagents_EN.md)** — thread-pool concurrency and sub-agent isolation
-- **[06 · Turning it into a real command-line tool](article/06-session-and-cli_EN.md)** — `session.py` and path-traversal defense
-- **[07 · Fork CoreCoder into your own coding agent](article/07-build-your-own_EN.md)** — from fork to custom tools to swapping models
+- **[01 · An agent, at its core, is a `while` loop](article/01-the-loop_EN.md)** — the original main loop, interrupts, and round limit
+- **[02 · The tool system: letting the model act, safely](article/02-tools_EN.md)** — the original tool system and bash safety gate
+- **[03 · Plug in any LLM, and keep the bill honest](article/03-llm-and-cost_EN.md)** — the original provider wrapper, retry, and cost-accounting design
+- **[04 · Surviving a long task on a finite window](article/04-context_EN.md)** — context compression and orphaned tool messages
+- **[05 · Parallel execution and sub-agents](article/05-parallel-and-subagents_EN.md)** — the original concurrency and sub-agent design
+- **[06 · Turning it into a real command-line tool](article/06-session-and-cli_EN.md)** — sessions and path-traversal defense
+- **[07 · Fork CoreCoder into your own coding agent](article/07-build-your-own_EN.md)** — extending the original minimal core
 
-## Fork it, build something better
+## Extension points
 
-Once you understand it, the natural next step is to fork. Getting started doesn't take much:
+CoreCoder now implements many of the production concerns that were
+intentionally absent from the original minimal core. The remaining gaps are
+also useful system-design directions:
 
-- **Swap in a model you actually use.** It's the two env vars from above; `llm.py` (336 lines) is the entry point for all provider adaptation.
-- **Add a tool of your own.** Write a new file against the tool base class in `tools/base.py` (27 lines): run tests, fetch a page, call an LSP, whatever. The end of the second essay walks you through your first one by hand.
-- **Rewrite the system prompt.** `prompt.py` is all of 33 lines; change one line and you'll watch the agent's temperament shift. It's the cheapest "change one thing, see a result" in the whole project.
-- **Import it as a library.** The top level exports `Agent`, `LLM`, and `Config`, ready to embed in your own program:
+- **Real sandbox isolation.** Permission policy controls whether a tool may execute, but hostile-code isolation ultimately belongs at the process, container, or OS boundary.
+- **Persistent production state.** Workflow checkpoints are stored durably, but a deployed system could move workflow state into a database or dedicated workflow engine.
+- **Distributed execution.** Tool concurrency is explicit and bounded locally; larger deployments could move tools and Agent roles onto independent workers.
+- **Live-model coding benchmarks.** The deterministic benchmark isolates runtime contracts; a separate benchmark can measure real coding quality across repositories, models, latency, and cost.
+- **Adaptive routing.** Routing is currently deterministic and policy-driven. Historical traces could later support empirical or learned model selection.
+- **Production telemetry backends.** Structured trace events already exist and can be exported to a larger observability stack.
 
-```python
-from corecoder import Agent, LLM
+## CLI commands
 
-llm = LLM(model="deepseek-chat", api_key="sk-...", base_url="https://api.deepseek.com")
-print(Agent(llm=llm).chat("find every TODO comment in this project and list them"))
-```
+Inside the interactive REPL, `/help` shows the available commands. Common
+ones include:
 
-Going deeper, the directions are out in the open too. None of the following is in CoreCoder, by design, not because it's unfinished. Flip it around and each one is an entry point you can carry into a real tool of your own:
-
-- **The dangerous-command blocking in bash is just a regex blacklist.** It guards against slips, not a security sandbox. Facing untrusted input means reaching for seccomp or container isolation. This is the hardest of the four; it goes all the way down to the syscall and isolation layer.
-- **Retry is only exponential backoff.** No fallback model, no hard dollar budget. Follow `llm.py` down and add a fallback model chain plus a stop-on-over-budget gate; the change stays mostly inside that one file.
-- **Sub-agents only run the plainest synchronous execution.** Make it async or a streaming executor and you close the exact gap the fifth essay identifies between this and how production agents stream execution.
-- **No MCP, no RAG.** Wire up MCP to give it the external tool ecosystem, or add retrieval-based code location for big repos. Both are real ways to grow from a minimal core into your own stronger agent.
-
-The README only points; the seventh essay picks up the code details for each. Pick one and start; that's the whole reason the core is kept this small.
-
-## Commands
-
-Inside the REPL, `/help` lists everything; these are the ones you'll reach for:
-
-```
+```text
+/help            show command help
+/reset           reset the conversation
 /model <name>    switch model
-/compact         compact the context by hand
-/tokens          token usage and cost estimate
-/diff            files changed this session
-/save  /sessions save / list sessions
-quit / exit      exit (Ctrl+C cancels the current round)
+/compact         compact context manually
+/tokens          show token usage and estimated cost
+/diff            show files modified in this session
+/save            save the current session
+/sessions        list saved sessions
+quit / exit      exit the REPL
 ```
 
-Session IDs are sanitized to safe characters before they become filenames, every archive lands under `~/.corecoder/sessions`, and a malicious session name can't traverse out.
+GitHub Issue workflows use the separate `--issue`, `--dry-run`,
+`--allow-unverified-repository`, and `--resume-workflow` CLI flags described
+earlier.
 
-## Related Projects
+## Development checks
 
-If working through CoreCoder was useful, here are a few other tools I've built around agents and LLM systems:
+Before submitting a change, run:
 
-- **[RepoWiki](https://github.com/he-yufeng/RepoWiki)** — dropped into an unfamiliar codebase? It gives you a guided wiki and a where-to-start reading path, a self-hostable DeepWiki alternative.
-- **[FindJobs-Agent](https://github.com/he-yufeng/FindJobs-Agent)** — stop sifting job boards by hand: it ranks postings against your resume and runs mock interviews.
-- **[ContractGuard](https://github.com/he-yufeng/ContractGuard)** — catch the risky clauses before you sign: it reads contracts and flags the dangerous bits.
-- **[GitSense](https://github.com/he-yufeng/GitSense)** — want to contribute to open source? It finds issues worth your time and gauges whether your PR will get merged.
-- **[CodeABC](https://github.com/he-yufeng/CodeABC)** — understand any codebase even if you don't code, built for non-programmers.
+```bash
+python -m pytest -q
+python -m ruff check corecoder tests
+python -m compileall -q corecoder tests
+```
 
-## Contributing / License
+The project targets Python 3.10+.
 
-Before you send anything, run `pytest tests/ -q` (86 tests), `ruff check`, and `compileall`, and make sure they're green. MIT licensed: fork it, learn from it, ship something better. A mention of this project is appreciated.
+## Upstream attribution
 
----
+CoreCoder originated from
+[Yufeng He's CoreCoder project](https://github.com/he-yufeng/CoreCoder), a
+compact educational implementation for understanding coding-agent internals.
 
-By [Yufeng He](https://github.com/he-yufeng), formerly at Moonshot AI (Kimi). I earlier wrote a fairly complete [Claude Code source analysis](https://zhuanlan.zhihu.com/p/1898797658343862272) on Zhihu; this project is its hands-on counterpart: that one walks you through reading it, this one through rebuilding it.
+This fork extends that foundation with the DevPilot GitHub repair workflow,
+repository and tool safety policies, explicit workflow state and checkpoints,
+human approval boundaries, MCP support, bounded asynchronous tool execution,
+structured tracing, Code RAG, a FastAPI service, Planner/Coder/Reviewer
+orchestration, Token/cost budgets, capability-aware model routing and
+fallback, and reproducible evaluation and benchmark infrastructure.
 
-> CoreCoder was formerly named NanoCoder; it was renamed to avoid confusion with [Nano-Collective/nanocoder](https://github.com/Nano-Collective/nanocoder), and old links redirect here automatically.
+The upstream source-reading articles are retained as learning material. See
+the repository license for reuse terms.
+
+> CoreCoder was formerly named NanoCoder in the upstream project. It was
+> renamed to avoid confusion with
+> [Nano-Collective/nanocoder](https://github.com/Nano-Collective/nanocoder).
