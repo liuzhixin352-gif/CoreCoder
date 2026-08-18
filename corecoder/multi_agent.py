@@ -116,7 +116,15 @@ def create_role_agent(
         max_context_tokens=max_context_tokens,
         permission_policy=resolved_permission_policy,
         request_tool_approval=request_tool_approval,
-        tracer=(RoleTracer(role, tracer) if tracer is not None else None),
+        tracer=(
+            RoleTracer(
+                role,
+                tracer,
+            )
+            if tracer is not None
+            else None
+        ),
+        route_role=role.value,
     )
 
 

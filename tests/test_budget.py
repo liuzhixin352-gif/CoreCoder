@@ -173,3 +173,26 @@ def test_budget_tracker_rejects_negative_usage(
         match=message,
     ):
         tracker.record(**usage)
+
+def test_budget_tracker_reports_remaining_cost():
+    tracker = BudgetTracker(
+        BudgetLimits(
+            max_cost_usd=1.0,
+        )
+    )
+
+    tracker.record(
+        cost_usd=0.25,
+    )
+
+    assert tracker.remaining_cost_usd == pytest.approx(
+        0.75,
+    )
+
+
+def test_budget_tracker_remaining_cost_is_none_without_cost_limit():
+    tracker = BudgetTracker(
+        BudgetLimits()
+    )
+
+    assert tracker.remaining_cost_usd is None

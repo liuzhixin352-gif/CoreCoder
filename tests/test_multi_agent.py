@@ -26,7 +26,12 @@ from corecoder.budget import (
     BudgetLimits,
     BudgetTracker,
 )
-
+from corecoder.model_router import (
+    RoleModelRouter,
+    RouteRequest,
+    StaticModelRouter,
+)
+from corecoder.routed_llm import RoutedLLM
 
 def test_multi_agent_runs_planner_coder_reviewer_in_order():
     calls = []
@@ -552,6 +557,7 @@ def test_create_role_agent_builds_isolated_role_agents(
             permission_policy,
             request_tool_approval,
             tracer,
+            route_role,
         ):
             self.llm = llm
             self.tools = tools
@@ -560,6 +566,7 @@ def test_create_role_agent_builds_isolated_role_agents(
             self.messages = []
             self.request_tool_approval = request_tool_approval
             self.tracer = tracer
+            self.route_role = route_role
             created.append(self)
 
     monkeypatch.setattr(
@@ -658,6 +665,10 @@ def test_create_role_agent_builds_isolated_role_agents(
     assert reviewer.permission_policy is permission_policy
 
     assert len(created) == 3
+
+    assert planner.route_role == "planner"
+    assert coder.route_role == "coder"
+    assert reviewer.route_role == "reviewer"
 
 
 def test_create_multi_agent_orchestrator_wires_role_agents(
@@ -1454,3 +1465,124 @@ def test_multi_agent_stops_following_roles_after_budget_exceeded():
         "planner",
         "coder",
     ]
+
+def test_multi_agent_routes_shared_llm_by_role():
+    class RoleBackend:
+        def __init__(
+            self,
+            model: str,
+            response: LLMResponse,
+        ):
+            self.model = model
+            self.response = response
+            self.calls = 0
+
+        def chat(
+            self,
+            messages,
+            tools=None,
+            on_token=None,
+        ):
+            del messages
+            del tools
+            del on_token
+
+            self.calls += 1
+
+            return self.response
+
+    planner_backend = RoleBackend(
+        "gpt-4o-mini",
+        LLMResponse(
+            content="implementation plan",
+            prompt_tokens=10,
+            completion_tokens=1,
+        ),
+    )
+
+    coder_backend = RoleBackend(
+        "gpt-4o",
+        LLMResponse(
+            content="implementation",
+            prompt_tokens=20,
+            completion_tokens=2,
+        ),
+    )
+
+    reviewer_backend = RoleBackend(
+        "gpt-4.1-mini",
+        LLMResponse(
+            content=(
+                '{"approved": true, '
+                '"feedback": ""}'
+            ),
+            prompt_tokens=30,
+            completion_tokens=3,
+        ),
+    )
+
+    routed_llm = RoutedLLM(
+        router=RoleModelRouter(
+            {
+                "planner": StaticModelRouter(
+                    [
+                        "gpt-4o-mini",
+                    ]
+                ),
+                "coder": StaticModelRouter(
+                    [
+                        "gpt-4o",
+                    ]
+                ),
+                "reviewer": StaticModelRouter(
+                    [
+                        "gpt-4.1-mini",
+                    ]
+                ),
+            }
+        ),
+        backends={
+            "gpt-4o-mini": planner_backend,
+            "gpt-4o": coder_backend,
+            "gpt-4.1-mini": reviewer_backend,
+        },
+        route_request=RouteRequest(),
+    )
+
+    orchestrator = create_multi_agent_orchestrator(
+        llm=routed_llm,
+        tools=[],
+        budget_limits=BudgetLimits(
+            max_cost_usd=1.0,
+        ),
+    )
+
+    result = orchestrator.run(
+        "Implement the feature",
+    )
+
+    assert result.plan == (
+        "implementation plan"
+    )
+    assert result.implementation == (
+        "implementation"
+    )
+    assert result.review.approved is True
+
+    assert planner_backend.calls == 1
+    assert coder_backend.calls == 1
+    assert reviewer_backend.calls == 1
+
+    assert (
+        routed_llm.route_request.role
+        is None
+    )
+
+    assert (
+        orchestrator.last_budget_usage
+        is not None
+    )
+    assert (
+        orchestrator.last_budget_usage.total_tokens
+        == 66
+    )
