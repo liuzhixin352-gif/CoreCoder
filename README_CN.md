@@ -10,7 +10,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://github.com/liuzhixin352-gif/CoreCoder/actions/workflows/ci.yml/badge.svg?branch=devpilot-v1)](https://github.com/liuzhixin352-gif/CoreCoder/actions)
+[![Tests](https://github.com/liuzhixin352-gif/CoreCoder/actions/workflows/ci.yml/badge.svg)](https://github.com/liuzhixin352-gif/CoreCoder/actions)
 
 </div>
 
@@ -175,10 +175,12 @@ agent。真实模型和真实代码仓库上的 coding quality 应作为独立�
 
 ## 快速开始
 
-当前 DevPilot runtime 开发在 `devpilot-v1` 分支。在最终 release 被提升到 `main` 之前，请显式 clone 该分支：
+
+```markdown
+Clone 仓库并以 editable mode 安装 CoreCoder：
 
 ```bash
-git clone --branch devpilot-v1 --single-branch https://github.com/liuzhixin352-gif/CoreCoder
+git clone https://github.com/liuzhixin352-gif/CoreCoder
 cd CoreCoder
 pip install -e .
 ```

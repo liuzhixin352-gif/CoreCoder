@@ -11,7 +11,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://github.com/liuzhixin352-gif/CoreCoder/actions/workflows/ci.yml/badge.svg?branch=devpilot-v1)](https://github.com/liuzhixin352-gif/CoreCoder/actions)
+[![Tests](https://github.com/liuzhixin352-gif/CoreCoder/actions/workflows/ci.yml/badge.svg)](https://github.com/liuzhixin352-gif/CoreCoder/actions)
 
 </div>
 
@@ -183,10 +183,11 @@ quality remain a separate evaluation layer.
 
 ## Quick start
 
-The current DevPilot runtime is developed on the `devpilot-v1` branch. Until the final release is promoted to `main`, clone that branch explicitly:
+```markdown
+Clone the repository and install CoreCoder in editable mode:
 
 ```bash
-git clone --branch devpilot-v1 --single-branch https://github.com/liuzhixin352-gif/CoreCoder
+git clone https://github.com/liuzhixin352-gif/CoreCoder
 cd CoreCoder
 pip install -e .
 ```
