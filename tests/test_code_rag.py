@@ -1216,3 +1216,74 @@ def test_search_repository_skips_python_file_with_invalid_syntax(
         result.chunk.symbol
         for result in results
     ] == ["target_symbol"]
+
+
+def test_lexical_code_index_prefers_implementation_over_test_code():
+    implementation_chunk = CodeChunk(
+        path="src/permissions.py",
+        start_line=1,
+        end_line=2,
+        content="def request_permission():\n    return True",
+        symbol="request_permission",
+    )
+    test_chunk = CodeChunk(
+        path="tests/test_permissions.py",
+        start_line=1,
+        end_line=2,
+        content=(
+            "def test_request_permission_approval_policy():\n"
+            "    return True"
+        ),
+        symbol="test_request_permission_approval_policy",
+    )
+
+    index = LexicalCodeIndex(
+        [
+            test_chunk,
+            implementation_chunk,
+        ]
+    )
+
+    results = index.search(
+        "permission approval",
+    )
+
+    assert results[0].chunk == implementation_chunk
+    assert test_chunk in [
+        result.chunk
+        for result in results
+    ]
+
+
+def test_lexical_code_index_keeps_auxiliary_code_searchable():
+    test_chunk = CodeChunk(
+        path="tests/test_permissions.py",
+        start_line=1,
+        end_line=2,
+        content=(
+            "def test_permission_denied():\n"
+            "    permission denied"
+        ),
+        symbol="test_permission_denied",
+    )
+
+    unrelated_chunk = CodeChunk(
+        path="src/context.py",
+        start_line=1,
+        end_line=2,
+        content="def compress_context():\n    return True",
+        symbol="compress_context",
+    )
+
+    index = LexicalCodeIndex(
+        [
+            test_chunk,
+            unrelated_chunk,
+        ]
+    )
+
+    results = index.search(
+        "permission denied",
+    )
+
+    assert results[0].chunk == test_chunk

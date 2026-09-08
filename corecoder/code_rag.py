@@ -25,6 +25,18 @@ _IDENTIFIER_PART_RE = re.compile(
 
 _COARSE_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
+_AUXILIARY_CODE_DIRS = {
+    "test",
+    "tests",
+    "testing",
+    "benchmark",
+    "benchmarks",
+    "spec",
+    "specs",
+}
+
+_AUXILIARY_CODE_WEIGHT = 0.5
+
 
 @dataclass(frozen=True)
 class CodeChunk:
@@ -175,6 +187,29 @@ def index_repository(repo_root: str | Path) -> list[CodeChunk]:
 
     return chunks
 
+def _is_auxiliary_code_path(path: str) -> bool:
+    """Return whether a path primarily contains tests or benchmarks."""
+    normalized = Path(path)
+    parts = [
+        part.lower()
+        for part in normalized.parts
+    ]
+    filename = normalized.name.lower()
+
+    if any(
+        part in _AUXILIARY_CODE_DIRS
+        for part in parts[:-1]
+    ):
+        return True
+
+    return (
+        filename == "conftest.py"
+        or filename.startswith("test_")
+        or filename.endswith("_test.py")
+        or filename.startswith("benchmark_")
+        or filename.startswith("bench_")
+        or filename.endswith("_spec.py")
+    )
 
 def _tokenize_code(text: str) -> set[str]:
     """Normalize source text into searchable code-aware tokens."""
@@ -269,9 +304,26 @@ class LexicalCodeIndex:
             for chunk, token_weights in matches.items()
         ]
 
+        def ranking_score(
+            result: CodeSearchResult,
+        ) -> float:
+            score = result.score
+
+            if _is_auxiliary_code_path(
+                result.chunk.path
+            ):
+                score *= _AUXILIARY_CODE_WEIGHT
+
+            return score
+
+
         ranked_results = sorted(
             results,
             key=lambda result: (
+                -ranking_score(result),
+                _is_auxiliary_code_path(
+                    result.chunk.path
+                ),
                 -result.score,
                 result.chunk.path,
                 result.chunk.start_line,
