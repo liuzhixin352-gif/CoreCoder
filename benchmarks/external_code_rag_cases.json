@@ -1,0 +1,512 @@
+{
+  "version": 1,
+  "frozen_at": "2026-09-08",
+  "task": "production implementation localization over whole Python repositories",
+  "metric_unit": "ranked code chunks; a hit occurs when a returned chunk belongs to any relevant_path",
+  "repositories": {
+    "flask": {
+      "directory": "flask",
+      "github": "pallets/flask",
+      "commit": "d318b683471101618febed18996405ad26462110"
+    },
+    "requests": {
+      "directory": "requests",
+      "github": "psf/requests",
+      "commit": "dae7ef63b4df6eded86637f251fc4e3a06c3b479"
+    },
+    "pytest": {
+      "directory": "pytest",
+      "github": "pytest-dev/pytest",
+      "commit": "0fabaa620d204fd040066eefd2a3ea2aad8d84cc"
+    }
+  },
+  "cases": [
+    {
+      "id": "flask-01",
+      "repo": "flask",
+      "query": "where does the application dispatch a matched request endpoint and call the view function",
+      "relevant_paths": [
+        "src/flask/app.py"
+      ]
+    },
+    {
+      "id": "flask-02",
+      "repo": "flask",
+      "query": "where are HTTP exceptions routed through registered error handlers",
+      "relevant_paths": [
+        "src/flask/app.py",
+        "src/flask/sansio/app.py"
+      ]
+    },
+    {
+      "id": "flask-03",
+      "repo": "flask",
+      "query": "where are request and application contexts pushed popped and cleaned up",
+      "relevant_paths": [
+        "src/flask/ctx.py"
+      ]
+    },
+    {
+      "id": "flask-04",
+      "repo": "flask",
+      "query": "where is the signed session cookie opened serialized and saved on the response",
+      "relevant_paths": [
+        "src/flask/sessions.py"
+      ]
+    },
+    {
+      "id": "flask-05",
+      "repo": "flask",
+      "query": "where is application configuration loaded from files objects mappings and environment variables",
+      "relevant_paths": [
+        "src/flask/config.py"
+      ]
+    },
+    {
+      "id": "flask-06",
+      "repo": "flask",
+      "query": "where does a blueprint record deferred setup operations and apply URL prefixes",
+      "relevant_paths": [
+        "src/flask/sansio/blueprints.py"
+      ]
+    },
+    {
+      "id": "flask-07",
+      "repo": "flask",
+      "query": "where are local files turned into responses with attachments conditional requests and download names",
+      "relevant_paths": [
+        "src/flask/helpers.py"
+      ]
+    },
+    {
+      "id": "flask-08",
+      "repo": "flask",
+      "query": "where are Jinja templates rendered or streamed with template context processors",
+      "relevant_paths": [
+        "src/flask/templating.py"
+      ]
+    },
+    {
+      "id": "flask-09",
+      "repo": "flask",
+      "query": "where does the command line discover an application or app factory and run Flask commands",
+      "relevant_paths": [
+        "src/flask/cli.py"
+      ]
+    },
+    {
+      "id": "flask-10",
+      "repo": "flask",
+      "query": "where is the default application logger created and its handler configured",
+      "relevant_paths": [
+        "src/flask/logging.py"
+      ]
+    },
+    {
+      "id": "flask-11",
+      "repo": "flask",
+      "query": "where is JSON serialized and converted into an application response by the JSON provider",
+      "relevant_paths": [
+        "src/flask/json/provider.py"
+      ]
+    },
+    {
+      "id": "flask-12",
+      "repo": "flask",
+      "query": "where does the Flask test client preserve contexts and provide a session transaction",
+      "relevant_paths": [
+        "src/flask/testing.py"
+      ]
+    },
+    {
+      "id": "flask-13",
+      "repo": "flask",
+      "query": "where is a URL built for an endpoint using application and request context information",
+      "relevant_paths": [
+        "src/flask/helpers.py",
+        "src/flask/app.py"
+      ]
+    },
+    {
+      "id": "flask-14",
+      "repo": "flask",
+      "query": "where are flash messages stored in the session and retrieved for the next request",
+      "relevant_paths": [
+        "src/flask/helpers.py"
+      ]
+    },
+    {
+      "id": "flask-15",
+      "repo": "flask",
+      "query": "where are view return values such as tuples dictionaries strings and responses normalized into a response object",
+      "relevant_paths": [
+        "src/flask/app.py"
+      ]
+    },
+    {
+      "id": "flask-16",
+      "repo": "flask",
+      "query": "where does the application serve a file from its configured static folder",
+      "relevant_paths": [
+        "src/flask/app.py"
+      ]
+    },
+    {
+      "id": "flask-17",
+      "repo": "flask",
+      "query": "where is a blueprint registered on an application and its deferred functions merged into application setup",
+      "relevant_paths": [
+        "src/flask/sansio/app.py",
+        "src/flask/sansio/blueprints.py"
+      ]
+    },
+    {
+      "id": "flask-18",
+      "repo": "flask",
+      "query": "where are current_app request session and g exposed as context local proxies",
+      "relevant_paths": [
+        "src/flask/globals.py"
+      ]
+    },
+    {
+      "id": "flask-19",
+      "repo": "flask",
+      "query": "where are request application context and template lifecycle signals declared",
+      "relevant_paths": [
+        "src/flask/signals.py"
+      ]
+    },
+    {
+      "id": "flask-20",
+      "repo": "flask",
+      "query": "where are async view functions wrapped so they can run under synchronous WSGI workers",
+      "relevant_paths": [
+        "src/flask/app.py"
+      ]
+    },
+    {
+      "id": "requests-01",
+      "repo": "requests",
+      "query": "where is a user request converted into a prepared request with method URL headers files and body",
+      "relevant_paths": [
+        "src/requests/models.py"
+      ]
+    },
+    {
+      "id": "requests-02",
+      "repo": "requests",
+      "query": "where does a session merge default headers cookies authentication and settings before preparing a request",
+      "relevant_paths": [
+        "src/requests/sessions.py"
+      ]
+    },
+    {
+      "id": "requests-03",
+      "repo": "requests",
+      "query": "where does the HTTP transport adapter send a prepared request through the connection pool",
+      "relevant_paths": [
+        "src/requests/adapters.py"
+      ]
+    },
+    {
+      "id": "requests-04",
+      "repo": "requests",
+      "query": "where are redirect responses followed and redirect history constructed",
+      "relevant_paths": [
+        "src/requests/sessions.py"
+      ]
+    },
+    {
+      "id": "requests-05",
+      "repo": "requests",
+      "query": "where are HTTP Basic proxy and Digest authentication attached to outgoing requests",
+      "relevant_paths": [
+        "src/requests/auth.py"
+      ]
+    },
+    {
+      "id": "requests-06",
+      "repo": "requests",
+      "query": "where are cookies extracted from responses and merged into a request cookie jar",
+      "relevant_paths": [
+        "src/requests/cookies.py",
+        "src/requests/sessions.py"
+      ]
+    },
+    {
+      "id": "requests-07",
+      "repo": "requests",
+      "query": "where are environment proxies discovered and NO_PROXY bypass rules evaluated",
+      "relevant_paths": [
+        "src/requests/utils.py",
+        "src/requests/sessions.py"
+      ]
+    },
+    {
+      "id": "requests-08",
+      "repo": "requests",
+      "query": "where does a response stream content decode text and parse JSON",
+      "relevant_paths": [
+        "src/requests/models.py"
+      ]
+    },
+    {
+      "id": "requests-09",
+      "repo": "requests",
+      "query": "where are query parameters combined with a URL and the outgoing URL normalized",
+      "relevant_paths": [
+        "src/requests/models.py"
+      ]
+    },
+    {
+      "id": "requests-10",
+      "repo": "requests",
+      "query": "where are multipart file uploads and form request bodies encoded",
+      "relevant_paths": [
+        "src/requests/models.py"
+      ]
+    },
+    {
+      "id": "requests-11",
+      "repo": "requests",
+      "query": "where are request response hooks registered and dispatched",
+      "relevant_paths": [
+        "src/requests/hooks.py",
+        "src/requests/models.py"
+      ]
+    },
+    {
+      "id": "requests-12",
+      "repo": "requests",
+      "query": "where is the case insensitive dictionary used for HTTP headers implemented",
+      "relevant_paths": [
+        "src/requests/structures.py"
+      ]
+    },
+    {
+      "id": "requests-13",
+      "repo": "requests",
+      "query": "where do top level get post put patch and delete helpers create and execute an HTTP request",
+      "relevant_paths": [
+        "src/requests/api.py"
+      ]
+    },
+    {
+      "id": "requests-14",
+      "repo": "requests",
+      "query": "where are timeout connection proxy SSL redirect and invalid URL exception classes defined",
+      "relevant_paths": [
+        "src/requests/exceptions.py"
+      ]
+    },
+    {
+      "id": "requests-15",
+      "repo": "requests",
+      "query": "where is the default certificate authority bundle path exposed",
+      "relevant_paths": [
+        "src/requests/certs.py"
+      ]
+    },
+    {
+      "id": "requests-16",
+      "repo": "requests",
+      "query": "where is the mapping from HTTP status numbers to names such as ok not found and too many requests defined",
+      "relevant_paths": [
+        "src/requests/status_codes.py"
+      ]
+    },
+    {
+      "id": "requests-17",
+      "repo": "requests",
+      "query": "where does a session mount and select a transport adapter based on URL prefix",
+      "relevant_paths": [
+        "src/requests/sessions.py"
+      ]
+    },
+    {
+      "id": "requests-18",
+      "repo": "requests",
+      "query": "where are authentication and proxy settings rebuilt when following a redirect",
+      "relevant_paths": [
+        "src/requests/sessions.py"
+      ]
+    },
+    {
+      "id": "requests-19",
+      "repo": "requests",
+      "query": "where are TLS certificate verification client certificates and connection options passed to urllib3",
+      "relevant_paths": [
+        "src/requests/adapters.py"
+      ]
+    },
+    {
+      "id": "requests-20",
+      "repo": "requests",
+      "query": "where are HTTP Link header values parsed into structured dictionaries",
+      "relevant_paths": [
+        "src/requests/utils.py"
+      ]
+    },
+    {
+      "id": "pytest-01",
+      "repo": "pytest",
+      "query": "where are fixture dependencies resolved and fixture setup teardown finalizers managed",
+      "relevant_paths": [
+        "src/_pytest/fixtures.py"
+      ]
+    },
+    {
+      "id": "pytest-02",
+      "repo": "pytest",
+      "query": "where are Python test modules classes and functions collected into test items",
+      "relevant_paths": [
+        "src/_pytest/python.py"
+      ]
+    },
+    {
+      "id": "pytest-03",
+      "repo": "pytest",
+      "query": "where are assert statements rewritten by transforming the Python AST during import",
+      "relevant_paths": [
+        "src/_pytest/assertion/rewrite.py"
+      ]
+    },
+    {
+      "id": "pytest-04",
+      "repo": "pytest",
+      "query": "where is stdout stderr and stdin capture started suspended resumed and read",
+      "relevant_paths": [
+        "src/_pytest/capture.py"
+      ]
+    },
+    {
+      "id": "pytest-05",
+      "repo": "pytest",
+      "query": "where is the main test session collection loop run and exit status determined",
+      "relevant_paths": [
+        "src/_pytest/main.py"
+      ]
+    },
+    {
+      "id": "pytest-06",
+      "repo": "pytest",
+      "query": "where is the setup call teardown runtest protocol executed and test reports created",
+      "relevant_paths": [
+        "src/_pytest/runner.py"
+      ]
+    },
+    {
+      "id": "pytest-07",
+      "repo": "pytest",
+      "query": "where is command line configuration initialized and the plugin manager bootstrapped",
+      "relevant_paths": [
+        "src/_pytest/config/__init__.py"
+      ]
+    },
+    {
+      "id": "pytest-08",
+      "repo": "pytest",
+      "query": "where are command line options and ini configuration arguments parsed",
+      "relevant_paths": [
+        "src/_pytest/config/argparsing.py"
+      ]
+    },
+    {
+      "id": "pytest-09",
+      "repo": "pytest",
+      "query": "where are test markers registered selected and matched by marker expressions",
+      "relevant_paths": [
+        "src/_pytest/mark/__init__.py",
+        "src/_pytest/mark/expression.py"
+      ]
+    },
+    {
+      "id": "pytest-10",
+      "repo": "pytest",
+      "query": "where are skip skipif and xfail conditions evaluated for test items",
+      "relevant_paths": [
+        "src/_pytest/skipping.py"
+      ]
+    },
+    {
+      "id": "pytest-11",
+      "repo": "pytest",
+      "query": "where are captured log records caplog and live logging integrated with test execution",
+      "relevant_paths": [
+        "src/_pytest/logging.py"
+      ]
+    },
+    {
+      "id": "pytest-12",
+      "repo": "pytest",
+      "query": "where does the terminal reporter display progress failures and the final test summary",
+      "relevant_paths": [
+        "src/_pytest/terminal.py"
+      ]
+    },
+    {
+      "id": "pytest-13",
+      "repo": "pytest",
+      "query": "where are test results serialized into JUnit XML reports",
+      "relevant_paths": [
+        "src/_pytest/junitxml.py"
+      ]
+    },
+    {
+      "id": "pytest-14",
+      "repo": "pytest",
+      "query": "where does monkeypatch modify attributes environment variables and undo changes after a test",
+      "relevant_paths": [
+        "src/_pytest/monkeypatch.py"
+      ]
+    },
+    {
+      "id": "pytest-15",
+      "repo": "pytest",
+      "query": "where are temporary directory fixtures such as tmp_path and tmpdir created and managed",
+      "relevant_paths": [
+        "src/_pytest/tmpdir.py"
+      ]
+    },
+    {
+      "id": "pytest-16",
+      "repo": "pytest",
+      "query": "where are doctest files and docstring examples collected and executed",
+      "relevant_paths": [
+        "src/_pytest/doctest.py"
+      ]
+    },
+    {
+      "id": "pytest-17",
+      "repo": "pytest",
+      "query": "where are warnings captured during test phases and forwarded to warning hooks",
+      "relevant_paths": [
+        "src/_pytest/warnings.py"
+      ]
+    },
+    {
+      "id": "pytest-18",
+      "repo": "pytest",
+      "query": "where is PDB debugger integration implemented including suspending output capture",
+      "relevant_paths": [
+        "src/_pytest/debugging.py"
+      ]
+    },
+    {
+      "id": "pytest-19",
+      "repo": "pytest",
+      "query": "where is unittest TestCase collection and execution integrated into pytest",
+      "relevant_paths": [
+        "src/_pytest/unittest.py"
+      ]
+    },
+    {
+      "id": "pytest-20",
+      "repo": "pytest",
+      "query": "where is exception assertion matching for raises and exception groups implemented",
+      "relevant_paths": [
+        "src/_pytest/raises.py"
+      ]
+    }
+  ]
+}
