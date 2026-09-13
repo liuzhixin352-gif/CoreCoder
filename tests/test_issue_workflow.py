@@ -49,7 +49,11 @@ def test_build_repair_prompt_contains_required_workflow():
 
     assert "# Execution mode: repair" in prompt
     assert "Make the smallest reasonable code change" in prompt
-    assert 'repo_map with path="." and max_files=50' in prompt
+    assert "Use code_search to retrieve the most relevant" in prompt
+    assert (
+        'Use repo_map with path="." and max_files=50 only when broader'
+        in prompt
+    )
     assert "Inspect explicitly referenced files first" in prompt
     assert "Run targeted tests after editing" in prompt
     assert "Do not claim success unless the tests support" in prompt
@@ -67,7 +71,7 @@ def test_build_dry_run_prompt_prohibits_modification():
         "inspection tools"
     ) in prompt
     assert (
-        "Only use read_file, glob, grep, and repo_map"
+        "Only use read_file, glob, grep, repo_map, and code_search"
     ) in prompt
     assert "bash, run_tests, edit_file, write_file" in prompt
     assert "parse_issue are unavailable" in prompt
@@ -132,7 +136,10 @@ def test_prompt_preserves_unicode():
 def test_prompt_uses_default_max_files():
     prompt = build_issue_repair_prompt(_sample_task())
 
-    assert 'repo_map with path="." and max_files=200' in prompt
+    assert (
+        'repo_map with path="." and max_files=200 only when broader'
+        in prompt
+    )
 
 
 def test_build_prompt_rejects_invalid_task():

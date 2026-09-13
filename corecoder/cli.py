@@ -84,6 +84,7 @@ _DRY_RUN_TOOL_NAMES = frozenset(
         "glob",
         "grep",
         "repo_map",
+        "code_search",
     }
 )
 
