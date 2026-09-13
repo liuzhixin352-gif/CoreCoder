@@ -246,6 +246,7 @@ def test_main_allows_unknown_repository_in_dry_run(
         "glob",
         "grep",
         "repo_map",
+        "code_search",
     }
 
     output = "\n".join(printed)
@@ -2965,6 +2966,7 @@ def test_main_runs_issue_workflow(
             "glob",
             "grep",
             "repo_map",
+            "code_search",
         ]
     else:
         assert agent_tools is None
@@ -3222,6 +3224,7 @@ def test_dry_run_tool_profile_excludes_dangerous_tools():
         "glob",
         "grep",
         "repo_map",
+        "code_search",
     }
 
     assert tool_names.isdisjoint(

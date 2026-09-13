@@ -1,0 +1,2100 @@
+[
+  {
+    "case_id": "flask-01",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/views.py",
+      "src/flask/sansio/app.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/ctx.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 54374,
+    "completion_tokens": 848,
+    "latency_seconds": 10.806673700004467,
+    "error": null
+  },
+  {
+    "case_id": "flask-01",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/views.py",
+      "src/flask/sansio/app.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/sansio/blueprints.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 50264,
+    "completion_tokens": 635,
+    "latency_seconds": 8.0542487000057,
+    "error": null
+  },
+  {
+    "case_id": "flask-02",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/sansio/app.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/ctx.py",
+      "src/flask/sansio/blueprints.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 57919,
+    "completion_tokens": 1230,
+    "latency_seconds": 9.233342200008337,
+    "error": null
+  },
+  {
+    "case_id": "flask-02",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/sansio/app.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/sansio/blueprints.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 72219,
+    "completion_tokens": 778,
+    "latency_seconds": 6.47143320000032,
+    "error": null
+  },
+  {
+    "case_id": "flask-03",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/ctx.py",
+      "src/flask/app.py",
+      "src/flask/globals.py",
+      "src/flask/testing.py",
+      "src/flask/helpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 11,
+    "prompt_tokens": 103104,
+    "completion_tokens": 1852,
+    "latency_seconds": 16.54541910000262,
+    "error": null
+  },
+  {
+    "case_id": "flask-03",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/ctx.py",
+      "src/flask/app.py",
+      "src/flask/cli.py",
+      "src/flask/testing.py",
+      "src/flask/globals.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 116556,
+    "completion_tokens": 920,
+    "latency_seconds": 9.223883900005603,
+    "error": null
+  },
+  {
+    "case_id": "flask-04",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/sessions.py",
+      "src/flask/json/tag.py",
+      "src/flask/ctx.py",
+      "src/flask/app.py",
+      "src/flask/wrappers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 45291,
+    "completion_tokens": 575,
+    "latency_seconds": 6.125622200008365,
+    "error": null
+  },
+  {
+    "case_id": "flask-04",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/sessions.py",
+      "src/flask/app.py",
+      "src/flask/ctx.py",
+      "src/flask/testing.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 43131,
+    "completion_tokens": 597,
+    "latency_seconds": 4.7616490999935195,
+    "error": null
+  },
+  {
+    "case_id": "flask-05",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/config.py",
+      "src/flask/sansio/app.py",
+      "src/flask/cli.py",
+      "src/flask/app.py",
+      "src/flask/helpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 46216,
+    "completion_tokens": 679,
+    "latency_seconds": 5.90131939999992,
+    "error": null
+  },
+  {
+    "case_id": "flask-05",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/config.py",
+      "src/flask/sansio/app.py",
+      "src/flask/cli.py",
+      "src/flask/app.py",
+      "src/flask/helpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 63458,
+    "completion_tokens": 447,
+    "latency_seconds": 4.946308600003249,
+    "error": null
+  },
+  {
+    "case_id": "flask-06",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [],
+    "rank": null,
+    "tool_calls": 11,
+    "prompt_tokens": 107620,
+    "completion_tokens": 1237,
+    "latency_seconds": 14.721506000001682,
+    "error": "ValueError: no JSON object in response: '(reached maximum tool-call rounds)'"
+  },
+  {
+    "case_id": "flask-06",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/sansio/blueprints.py",
+      "src/flask/blueprints.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/sansio/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 35748,
+    "completion_tokens": 679,
+    "latency_seconds": 6.558312499997555,
+    "error": null
+  },
+  {
+    "case_id": "flask-07",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/helpers.py",
+      "src/flask/app.py",
+      "src/flask/blueprints.py",
+      "src/flask/wrappers.py",
+      "src/flask/sansio/scaffold.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 68884,
+    "completion_tokens": 1315,
+    "latency_seconds": 9.365517900005216,
+    "error": null
+  },
+  {
+    "case_id": "flask-07",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/helpers.py",
+      "src/flask/app.py",
+      "src/flask/blueprints.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/sansio/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 151838,
+    "completion_tokens": 1192,
+    "latency_seconds": 9.380137100000866,
+    "error": null
+  },
+  {
+    "case_id": "flask-08",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/templating.py",
+      "src/flask/app.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/sansio/blueprints.py",
+      "src/flask/helpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 58468,
+    "completion_tokens": 878,
+    "latency_seconds": 7.3446986000053585,
+    "error": null
+  },
+  {
+    "case_id": "flask-08",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/templating.py",
+      "src/flask/app.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/helpers.py",
+      "src/flask/sansio/blueprints.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 182797,
+    "completion_tokens": 1375,
+    "latency_seconds": 9.916944699987653,
+    "error": null
+  },
+  {
+    "case_id": "flask-09",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/cli.py",
+      "src/flask/__main__.py",
+      "src/flask/testing.py",
+      "src/flask/app.py",
+      "src/flask/sansio/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 54284,
+    "completion_tokens": 1088,
+    "latency_seconds": 8.853008000005502,
+    "error": null
+  },
+  {
+    "case_id": "flask-09",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/cli.py",
+      "src/flask/__main__.py",
+      "src/flask/testing.py",
+      "src/flask/app.py",
+      "src/flask/sansio/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 136989,
+    "completion_tokens": 1010,
+    "latency_seconds": 9.545573999988846,
+    "error": null
+  },
+  {
+    "case_id": "flask-10",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/logging.py",
+      "src/flask/sansio/app.py",
+      "src/flask/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 37167,
+    "completion_tokens": 518,
+    "latency_seconds": 5.745616900007008,
+    "error": null
+  },
+  {
+    "case_id": "flask-10",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/logging.py",
+      "src/flask/sansio/app.py",
+      "src/flask/app.py",
+      "src/flask/debughelpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 180878,
+    "completion_tokens": 1358,
+    "latency_seconds": 9.633099299986497,
+    "error": null
+  },
+  {
+    "case_id": "flask-11",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/json/provider.py",
+      "src/flask/json/__init__.py",
+      "src/flask/app.py",
+      "src/flask/wrappers.py",
+      "src/flask/sansio/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 43499,
+    "completion_tokens": 543,
+    "latency_seconds": 5.229629800000112,
+    "error": null
+  },
+  {
+    "case_id": "flask-11",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/json/provider.py",
+      "src/flask/json/__init__.py",
+      "src/flask/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 67180,
+    "completion_tokens": 623,
+    "latency_seconds": 5.769194900000002,
+    "error": null
+  },
+  {
+    "case_id": "flask-12",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/testing.py",
+      "src/flask/app.py",
+      "src/flask/ctx.py",
+      "src/flask/sessions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 92499,
+    "completion_tokens": 1510,
+    "latency_seconds": 10.633814400003757,
+    "error": null
+  },
+  {
+    "case_id": "flask-12",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/testing.py",
+      "src/flask/app.py",
+      "src/flask/ctx.py",
+      "src/flask/sessions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 64525,
+    "completion_tokens": 691,
+    "latency_seconds": 6.3644500999944285,
+    "error": null
+  },
+  {
+    "case_id": "flask-13",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/helpers.py",
+      "src/flask/ctx.py",
+      "src/flask/sansio/app.py",
+      "src/flask/testing.py"
+    ],
+    "rank": 1,
+    "tool_calls": 9,
+    "prompt_tokens": 95188,
+    "completion_tokens": 1349,
+    "latency_seconds": 10.062489899995853,
+    "error": null
+  },
+  {
+    "case_id": "flask-13",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/ctx.py",
+      "src/flask/helpers.py",
+      "src/flask/sansio/app.py",
+      "src/flask/sansio/scaffold.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 68127,
+    "completion_tokens": 721,
+    "latency_seconds": 6.500786300006439,
+    "error": null
+  },
+  {
+    "case_id": "flask-14",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/helpers.py",
+      "src/flask/sessions.py",
+      "src/flask/ctx.py",
+      "src/flask/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 53949,
+    "completion_tokens": 970,
+    "latency_seconds": 8.512699600003543,
+    "error": null
+  },
+  {
+    "case_id": "flask-14",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/helpers.py",
+      "src/flask/ctx.py",
+      "src/flask/sessions.py",
+      "src/flask/app.py",
+      "src/flask/sansio/app.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 88915,
+    "completion_tokens": 575,
+    "latency_seconds": 7.272349999999278,
+    "error": null
+  },
+  {
+    "case_id": "flask-15",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/helpers.py",
+      "src/flask/json/provider.py",
+      "src/flask/wrappers.py",
+      "src/flask/views.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 58926,
+    "completion_tokens": 1470,
+    "latency_seconds": 9.830129300011322,
+    "error": null
+  },
+  {
+    "case_id": "flask-15",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/helpers.py",
+      "src/flask/json/provider.py",
+      "src/flask/typing.py",
+      "src/flask/views.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 137795,
+    "completion_tokens": 1336,
+    "latency_seconds": 10.039198400001624,
+    "error": null
+  },
+  {
+    "case_id": "flask-16",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [],
+    "rank": null,
+    "tool_calls": 5,
+    "prompt_tokens": 44398,
+    "completion_tokens": 1582,
+    "latency_seconds": 8.570925299994997,
+    "error": "ValueError: no JSON object in response: ''"
+  },
+  {
+    "case_id": "flask-16",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/helpers.py",
+      "src/flask/sansio/scaffold.py",
+      "src/flask/blueprints.py",
+      "src/flask/sansio/blueprints.py"
+    ],
+    "rank": 1,
+    "tool_calls": 2,
+    "prompt_tokens": 52215,
+    "completion_tokens": 505,
+    "latency_seconds": 3.9155303000006825,
+    "error": null
+  },
+  {
+    "case_id": "flask-17",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/sansio/blueprints.py",
+      "src/flask/sansio/app.py",
+      "src/flask/blueprints.py",
+      "src/flask/app.py",
+      "src/flask/sansio/scaffold.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 70535,
+    "completion_tokens": 1735,
+    "latency_seconds": 10.589223000002676,
+    "error": null
+  },
+  {
+    "case_id": "flask-17",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/sansio/blueprints.py",
+      "src/flask/sansio/app.py",
+      "src/flask/blueprints.py",
+      "src/flask/app.py",
+      "src/flask/sansio/scaffold.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 106731,
+    "completion_tokens": 908,
+    "latency_seconds": 8.426631800000905,
+    "error": null
+  },
+  {
+    "case_id": "flask-18",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/globals.py",
+      "src/flask/ctx.py",
+      "src/flask/__init__.py",
+      "src/flask/sessions.py",
+      "src/flask/helpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 27524,
+    "completion_tokens": 492,
+    "latency_seconds": 3.628371700004209,
+    "error": null
+  },
+  {
+    "case_id": "flask-18",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/globals.py",
+      "src/flask/ctx.py",
+      "src/flask/__init__.py",
+      "src/flask/app.py",
+      "src/flask/wrappers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 84608,
+    "completion_tokens": 795,
+    "latency_seconds": 6.362162700010231,
+    "error": null
+  },
+  {
+    "case_id": "flask-19",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/signals.py",
+      "src/flask/templating.py",
+      "src/flask/ctx.py",
+      "src/flask/app.py",
+      "src/flask/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 24836,
+    "completion_tokens": 784,
+    "latency_seconds": 6.516302000003634,
+    "error": null
+  },
+  {
+    "case_id": "flask-19",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/signals.py",
+      "src/flask/templating.py",
+      "src/flask/app.py",
+      "src/flask/ctx.py",
+      "src/flask/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 129358,
+    "completion_tokens": 994,
+    "latency_seconds": 8.211571000007098,
+    "error": null
+  },
+  {
+    "case_id": "flask-20",
+    "repo": "flask",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/views.py",
+      "src/flask/ctx.py",
+      "src/flask/helpers.py",
+      "src/flask/templating.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 68969,
+    "completion_tokens": 1425,
+    "latency_seconds": 9.141611899991403,
+    "error": null
+  },
+  {
+    "case_id": "flask-20",
+    "repo": "flask",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/flask/app.py",
+      "src/flask/views.py",
+      "src/flask/ctx.py",
+      "src/flask/sansio/app.py",
+      "src/flask/helpers.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 99014,
+    "completion_tokens": 1415,
+    "latency_seconds": 9.551074200004223,
+    "error": null
+  },
+  {
+    "case_id": "requests-01",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/api.py",
+      "src/requests/adapters.py",
+      "src/requests/utils.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 28947,
+    "completion_tokens": 1093,
+    "latency_seconds": 8.227459700006875,
+    "error": null
+  },
+  {
+    "case_id": "requests-01",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/api.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 17984,
+    "completion_tokens": 422,
+    "latency_seconds": 3.3185733999998774,
+    "error": null
+  },
+  {
+    "case_id": "requests-02",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/cookies.py",
+      "src/requests/utils.py",
+      "src/requests/auth.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 21143,
+    "completion_tokens": 744,
+    "latency_seconds": 5.990225300003658,
+    "error": null
+  },
+  {
+    "case_id": "requests-02",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/cookies.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 35242,
+    "completion_tokens": 401,
+    "latency_seconds": 3.7294995999982348,
+    "error": null
+  },
+  {
+    "case_id": "requests-03",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/adapters.py",
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/_types.py",
+      "src/requests/exceptions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 21230,
+    "completion_tokens": 680,
+    "latency_seconds": 5.551893399999244,
+    "error": null
+  },
+  {
+    "case_id": "requests-03",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/adapters.py",
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/auth.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 35550,
+    "completion_tokens": 975,
+    "latency_seconds": 8.431651999999303,
+    "error": null
+  },
+  {
+    "case_id": "requests-04",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/adapters.py",
+      "src/requests/auth.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 40520,
+    "completion_tokens": 1006,
+    "latency_seconds": 12.206746900003054,
+    "error": null
+  },
+  {
+    "case_id": "requests-04",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/auth.py",
+      "src/requests/api.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 31572,
+    "completion_tokens": 847,
+    "latency_seconds": 8.086148100002902,
+    "error": null
+  },
+  {
+    "case_id": "requests-05",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/auth.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/utils.py"
+    ],
+    "rank": 1,
+    "tool_calls": 9,
+    "prompt_tokens": 38848,
+    "completion_tokens": 1092,
+    "latency_seconds": 11.671732200004044,
+    "error": null
+  },
+  {
+    "case_id": "requests-05",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/auth.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/utils.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 24175,
+    "completion_tokens": 528,
+    "latency_seconds": 5.68990159999521,
+    "error": null
+  },
+  {
+    "case_id": "requests-06",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/cookies.py",
+      "src/requests/sessions.py",
+      "src/requests/models.py",
+      "src/requests/adapters.py",
+      "src/requests/auth.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 38821,
+    "completion_tokens": 1373,
+    "latency_seconds": 9.979318099998636,
+    "error": null
+  },
+  {
+    "case_id": "requests-06",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/cookies.py",
+      "src/requests/sessions.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/auth.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 13976,
+    "completion_tokens": 414,
+    "latency_seconds": 4.669715399999404,
+    "error": null
+  },
+  {
+    "case_id": "requests-07",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/utils.py",
+      "src/requests/sessions.py",
+      "src/requests/adapters.py",
+      "src/requests/compat.py",
+      "src/requests/models.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 27896,
+    "completion_tokens": 640,
+    "latency_seconds": 6.761570699993172,
+    "error": null
+  },
+  {
+    "case_id": "requests-07",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/utils.py",
+      "src/requests/sessions.py",
+      "src/requests/compat.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 31736,
+    "completion_tokens": 1079,
+    "latency_seconds": 9.62877720000688,
+    "error": null
+  },
+  {
+    "case_id": "requests-08",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/exceptions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 31762,
+    "completion_tokens": 844,
+    "latency_seconds": 7.5509808999922825,
+    "error": null
+  },
+  {
+    "case_id": "requests-08",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/compat.py",
+      "src/requests/adapters.py",
+      "src/requests/exceptions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 58224,
+    "completion_tokens": 764,
+    "latency_seconds": 7.077916399997775,
+    "error": null
+  },
+  {
+    "case_id": "requests-09",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/sessions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 25772,
+    "completion_tokens": 652,
+    "latency_seconds": 5.983008600000176,
+    "error": null
+  },
+  {
+    "case_id": "requests-09",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/sessions.py",
+      "src/requests/api.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 37446,
+    "completion_tokens": 665,
+    "latency_seconds": 4.437392599997111,
+    "error": null
+  },
+  {
+    "case_id": "requests-10",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/compat.py",
+      "src/requests/adapters.py",
+      "src/requests/sessions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 32293,
+    "completion_tokens": 861,
+    "latency_seconds": 8.530735899999854,
+    "error": null
+  },
+  {
+    "case_id": "requests-10",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/api.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 49914,
+    "completion_tokens": 1176,
+    "latency_seconds": 8.755812400006107,
+    "error": null
+  },
+  {
+    "case_id": "requests-11",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/hooks.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/auth.py",
+      "src/requests/_types.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 15053,
+    "completion_tokens": 407,
+    "latency_seconds": 4.299120299998322,
+    "error": null
+  },
+  {
+    "case_id": "requests-11",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/hooks.py",
+      "src/requests/sessions.py",
+      "src/requests/models.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 22936,
+    "completion_tokens": 728,
+    "latency_seconds": 6.0252902999927755,
+    "error": null
+  },
+  {
+    "case_id": "requests-12",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/structures.py",
+      "src/requests/models.py",
+      "src/requests/utils.py",
+      "src/requests/sessions.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 14252,
+    "completion_tokens": 359,
+    "latency_seconds": 3.348230400006287,
+    "error": null
+  },
+  {
+    "case_id": "requests-12",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/structures.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/utils.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 22842,
+    "completion_tokens": 604,
+    "latency_seconds": 4.848261999999522,
+    "error": null
+  },
+  {
+    "case_id": "requests-13",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/api.py",
+      "src/requests/sessions.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 14709,
+    "completion_tokens": 499,
+    "latency_seconds": 3.3799906999920495,
+    "error": null
+  },
+  {
+    "case_id": "requests-13",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/api.py",
+      "src/requests/sessions.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 63514,
+    "completion_tokens": 780,
+    "latency_seconds": 6.931889700004831,
+    "error": null
+  },
+  {
+    "case_id": "requests-14",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/exceptions.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py",
+      "src/requests/utils.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 21952,
+    "completion_tokens": 870,
+    "latency_seconds": 6.7709421000035945,
+    "error": null
+  },
+  {
+    "case_id": "requests-14",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/exceptions.py",
+      "src/requests/adapters.py",
+      "src/requests/sessions.py",
+      "src/requests/__init__.py",
+      "src/requests/models.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 51829,
+    "completion_tokens": 678,
+    "latency_seconds": 5.144803899995168,
+    "error": null
+  },
+  {
+    "case_id": "requests-15",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/utils.py",
+      "src/requests/certs.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 2,
+    "tool_calls": 5,
+    "prompt_tokens": 30157,
+    "completion_tokens": 1119,
+    "latency_seconds": 7.318284000008134,
+    "error": null
+  },
+  {
+    "case_id": "requests-15",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/utils.py",
+      "src/requests/certs.py",
+      "src/requests/adapters.py"
+    ],
+    "rank": 2,
+    "tool_calls": 7,
+    "prompt_tokens": 44436,
+    "completion_tokens": 986,
+    "latency_seconds": 9.204889400003594,
+    "error": null
+  },
+  {
+    "case_id": "requests-16",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/status_codes.py",
+      "src/requests/structures.py",
+      "src/requests/__init__.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 24576,
+    "completion_tokens": 406,
+    "latency_seconds": 5.206359400006477,
+    "error": null
+  },
+  {
+    "case_id": "requests-16",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/status_codes.py",
+      "src/requests/structures.py",
+      "src/requests/__init__.py",
+      "src/requests/models.py",
+      "src/requests/sessions.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 69535,
+    "completion_tokens": 941,
+    "latency_seconds": 6.383347199996933,
+    "error": null
+  },
+  {
+    "case_id": "requests-17",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py",
+      "src/requests/exceptions.py",
+      "src/requests/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 20561,
+    "completion_tokens": 845,
+    "latency_seconds": 5.7978051000100095,
+    "error": null
+  },
+  {
+    "case_id": "requests-17",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/adapters.py",
+      "src/requests/api.py",
+      "src/requests/models.py",
+      "src/requests/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 70152,
+    "completion_tokens": 1000,
+    "latency_seconds": 8.230541700002505,
+    "error": null
+  },
+  {
+    "case_id": "requests-18",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/utils.py",
+      "src/requests/models.py",
+      "src/requests/auth.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 30284,
+    "completion_tokens": 785,
+    "latency_seconds": 6.635963800013997,
+    "error": null
+  },
+  {
+    "case_id": "requests-18",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/sessions.py",
+      "src/requests/utils.py",
+      "src/requests/adapters.py",
+      "src/requests/models.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 67346,
+    "completion_tokens": 739,
+    "latency_seconds": 6.706522300009965,
+    "error": null
+  },
+  {
+    "case_id": "requests-19",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/adapters.py",
+      "src/requests/sessions.py",
+      "src/requests/utils.py",
+      "src/requests/certs.py",
+      "src/requests/_types.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 59179,
+    "completion_tokens": 1248,
+    "latency_seconds": 8.377789499994833,
+    "error": null
+  },
+  {
+    "case_id": "requests-19",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/adapters.py",
+      "src/requests/sessions.py",
+      "src/requests/utils.py",
+      "src/requests/certs.py",
+      "src/requests/api.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 84377,
+    "completion_tokens": 1031,
+    "latency_seconds": 8.61858029999712,
+    "error": null
+  },
+  {
+    "case_id": "requests-20",
+    "repo": "requests",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/requests/utils.py",
+      "src/requests/models.py",
+      "tests/test_utils.py",
+      "tests/test_requests.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 29057,
+    "completion_tokens": 946,
+    "latency_seconds": 7.500698800009559,
+    "error": null
+  },
+  {
+    "case_id": "requests-20",
+    "repo": "requests",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/requests/utils.py",
+      "src/requests/models.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 50941,
+    "completion_tokens": 680,
+    "latency_seconds": 6.238180500004091,
+    "error": null
+  },
+  {
+    "case_id": "pytest-01",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/fixtures.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/python.py",
+      "src/_pytest/scope.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 163213,
+    "completion_tokens": 1232,
+    "latency_seconds": 9.730799099997967,
+    "error": null
+  },
+  {
+    "case_id": "pytest-01",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/fixtures.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/python.py",
+      "src/_pytest/scope.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 36350,
+    "completion_tokens": 1538,
+    "latency_seconds": 12.154381900007138,
+    "error": null
+  },
+  {
+    "case_id": "pytest-02",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/python.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/unittest.py",
+      "src/_pytest/main.py",
+      "src/_pytest/doctest.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 120072,
+    "completion_tokens": 988,
+    "latency_seconds": 8.143173999997089,
+    "error": null
+  },
+  {
+    "case_id": "pytest-02",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/python.py",
+      "src/_pytest/main.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/fixtures.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 192217,
+    "completion_tokens": 1209,
+    "latency_seconds": 13.949312100012321,
+    "error": null
+  },
+  {
+    "case_id": "pytest-03",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/assertion/rewrite.py",
+      "src/_pytest/assertion/__init__.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/assertion/util.py",
+      "src/_pytest/assertion/truncate.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 188253,
+    "completion_tokens": 1660,
+    "latency_seconds": 11.732943399998476,
+    "error": null
+  },
+  {
+    "case_id": "pytest-03",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/assertion/rewrite.py",
+      "src/_pytest/assertion/__init__.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/python.py",
+      "src/_pytest/_py/path.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 85698,
+    "completion_tokens": 859,
+    "latency_seconds": 8.179170999996131,
+    "error": null
+  },
+  {
+    "case_id": "pytest-04",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/capture.py",
+      "src/_pytest/debugging.py",
+      "src/_pytest/logging.py",
+      "src/_pytest/subtests.py",
+      "src/_pytest/setuponly.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 81684,
+    "completion_tokens": 518,
+    "latency_seconds": 6.664378600005875,
+    "error": null
+  },
+  {
+    "case_id": "pytest-04",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [],
+    "rank": null,
+    "tool_calls": 5,
+    "prompt_tokens": 55133,
+    "completion_tokens": 1797,
+    "latency_seconds": 19.623788499986404,
+    "error": "ValueError: no JSON object in response: ''"
+  },
+  {
+    "case_id": "pytest-05",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/main.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/config/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 9,
+    "prompt_tokens": 209672,
+    "completion_tokens": 1449,
+    "latency_seconds": 13.185516199999256,
+    "error": null
+  },
+  {
+    "case_id": "pytest-05",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/main.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/terminal.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/hookspec.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 100286,
+    "completion_tokens": 1245,
+    "latency_seconds": 12.384936499991454,
+    "error": null
+  },
+  {
+    "case_id": "pytest-06",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/runner.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/main.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/terminal.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 158371,
+    "completion_tokens": 966,
+    "latency_seconds": 8.290854200007743,
+    "error": null
+  },
+  {
+    "case_id": "pytest-06",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/runner.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/assertion/__init__.py",
+      "src/_pytest/unittest.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 22689,
+    "completion_tokens": 715,
+    "latency_seconds": 9.06801099999575,
+    "error": null
+  },
+  {
+    "case_id": "pytest-07",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/config/argparsing.py",
+      "src/_pytest/main.py",
+      "src/_pytest/config/findpaths.py",
+      "src/pytest/__main__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 13,
+    "prompt_tokens": 309268,
+    "completion_tokens": 1979,
+    "latency_seconds": 15.101131000003079,
+    "error": null
+  },
+  {
+    "case_id": "pytest-07",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/config/argparsing.py",
+      "src/_pytest/helpconfig.py",
+      "src/_pytest/main.py",
+      "src/pytest/__main__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 10,
+    "prompt_tokens": 91619,
+    "completion_tokens": 1809,
+    "latency_seconds": 16.388821800006554,
+    "error": null
+  },
+  {
+    "case_id": "pytest-08",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/config/argparsing.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/config/findpaths.py",
+      "src/_pytest/helpconfig.py",
+      "src/_pytest/_argcomplete.py"
+    ],
+    "rank": 1,
+    "tool_calls": 9,
+    "prompt_tokens": 215507,
+    "completion_tokens": 1421,
+    "latency_seconds": 11.907142500000191,
+    "error": null
+  },
+  {
+    "case_id": "pytest-08",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/config/argparsing.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/config/findpaths.py",
+      "src/_pytest/main.py",
+      "src/_pytest/helpconfig.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 80970,
+    "completion_tokens": 900,
+    "latency_seconds": 9.351582299990696,
+    "error": null
+  },
+  {
+    "case_id": "pytest-09",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/mark/__init__.py",
+      "src/_pytest/mark/expression.py",
+      "src/_pytest/mark/structures.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/python.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 173148,
+    "completion_tokens": 1322,
+    "latency_seconds": 10.745851699990453,
+    "error": null
+  },
+  {
+    "case_id": "pytest-09",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/mark/__init__.py",
+      "src/_pytest/mark/expression.py",
+      "src/_pytest/mark/structures.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/nodes.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 93103,
+    "completion_tokens": 738,
+    "latency_seconds": 10.273855799998273,
+    "error": null
+  },
+  {
+    "case_id": "pytest-10",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/skipping.py",
+      "src/_pytest/unittest.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/outcomes.py",
+      "src/_pytest/mark/structures.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 125142,
+    "completion_tokens": 835,
+    "latency_seconds": 7.423720499995397,
+    "error": null
+  },
+  {
+    "case_id": "pytest-10",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/skipping.py",
+      "src/_pytest/outcomes.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/unittest.py",
+      "src/_pytest/mark/structures.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 143707,
+    "completion_tokens": 1547,
+    "latency_seconds": 13.306949300007545,
+    "error": null
+  },
+  {
+    "case_id": "pytest-11",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/logging.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/subtests.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/capture.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 125560,
+    "completion_tokens": 1157,
+    "latency_seconds": 8.344483599998057,
+    "error": null
+  },
+  {
+    "case_id": "pytest-11",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/logging.py",
+      "src/_pytest/subtests.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/capture.py",
+      "src/_pytest/nodes.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 30763,
+    "completion_tokens": 882,
+    "latency_seconds": 9.513074899994535,
+    "error": null
+  },
+  {
+    "case_id": "pytest-12",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/terminal.py",
+      "src/_pytest/terminalprogress.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/reports.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 163632,
+    "completion_tokens": 1083,
+    "latency_seconds": 10.37763129999803,
+    "error": null
+  },
+  {
+    "case_id": "pytest-12",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/terminal.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/terminalprogress.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/config/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 4,
+    "prompt_tokens": 59195,
+    "completion_tokens": 981,
+    "latency_seconds": 10.481533500002115,
+    "error": null
+  },
+  {
+    "case_id": "pytest-13",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/junitxml.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/hookspec.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 171924,
+    "completion_tokens": 1133,
+    "latency_seconds": 10.71587489999365,
+    "error": null
+  },
+  {
+    "case_id": "pytest-13",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/junitxml.py",
+      "src/_pytest/reports.py",
+      "src/_pytest/config/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 52380,
+    "completion_tokens": 1767,
+    "latency_seconds": 13.591897599995718,
+    "error": null
+  },
+  {
+    "case_id": "pytest-14",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/monkeypatch.py",
+      "src/pytest/__init__.py",
+      "src/_pytest/fixtures.py",
+      "src/_pytest/legacypath.py",
+      "src/_pytest/pytester.py"
+    ],
+    "rank": 1,
+    "tool_calls": 3,
+    "prompt_tokens": 83669,
+    "completion_tokens": 710,
+    "latency_seconds": 6.90872949999175,
+    "error": null
+  },
+  {
+    "case_id": "pytest-14",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/monkeypatch.py",
+      "src/_pytest/pytester.py",
+      "src/_pytest/legacypath.py",
+      "src/_pytest/timing.py",
+      "src/_pytest/tmpdir.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 57670,
+    "completion_tokens": 1025,
+    "latency_seconds": 10.343203299999004,
+    "error": null
+  },
+  {
+    "case_id": "pytest-15",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/tmpdir.py",
+      "src/_pytest/legacypath.py",
+      "src/_pytest/pathlib.py",
+      "src/_pytest/fixtures.py",
+      "src/_pytest/pytester.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 125896,
+    "completion_tokens": 1287,
+    "latency_seconds": 11.016753499992774,
+    "error": null
+  },
+  {
+    "case_id": "pytest-15",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/tmpdir.py",
+      "src/_pytest/pathlib.py",
+      "src/_pytest/legacypath.py",
+      "src/_pytest/_py/path.py",
+      "src/_pytest/pytester.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 56773,
+    "completion_tokens": 1272,
+    "latency_seconds": 11.00788069999544,
+    "error": null
+  },
+  {
+    "case_id": "pytest-16",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/doctest.py",
+      "src/_pytest/python.py",
+      "src/_pytest/main.py",
+      "src/_pytest/nodes.py",
+      "src/_pytest/config/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 9,
+    "prompt_tokens": 216491,
+    "completion_tokens": 1699,
+    "latency_seconds": 11.699480100010987,
+    "error": null
+  },
+  {
+    "case_id": "pytest-16",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/doctest.py",
+      "src/_pytest/python.py",
+      "src/_pytest/main.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/nodes.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 88518,
+    "completion_tokens": 1495,
+    "latency_seconds": 13.718982400008827,
+    "error": null
+  },
+  {
+    "case_id": "pytest-17",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/warnings.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/terminal.py",
+      "src/_pytest/recwarn.py"
+    ],
+    "rank": 1,
+    "tool_calls": 7,
+    "prompt_tokens": 162430,
+    "completion_tokens": 1194,
+    "latency_seconds": 11.197362500010058,
+    "error": null
+  },
+  {
+    "case_id": "pytest-17",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/warnings.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/terminal.py",
+      "src/_pytest/recwarn.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 144590,
+    "completion_tokens": 1200,
+    "latency_seconds": 12.695856499994989,
+    "error": null
+  },
+  {
+    "case_id": "pytest-18",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/debugging.py",
+      "src/_pytest/capture.py",
+      "src/_pytest/faulthandler.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/hookspec.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 169247,
+    "completion_tokens": 1026,
+    "latency_seconds": 9.312812599993777,
+    "error": null
+  },
+  {
+    "case_id": "pytest-18",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/debugging.py",
+      "src/_pytest/capture.py",
+      "src/_pytest/hookspec.py",
+      "src/_pytest/faulthandler.py",
+      "src/_pytest/runner.py"
+    ],
+    "rank": 1,
+    "tool_calls": 6,
+    "prompt_tokens": 36512,
+    "completion_tokens": 1041,
+    "latency_seconds": 11.314122800002224,
+    "error": null
+  },
+  {
+    "case_id": "pytest-19",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [
+      "src/_pytest/unittest.py",
+      "src/_pytest/python.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/hookspec.py"
+    ],
+    "rank": 1,
+    "tool_calls": 8,
+    "prompt_tokens": 168928,
+    "completion_tokens": 1090,
+    "latency_seconds": 9.050314399995841,
+    "error": null
+  },
+  {
+    "case_id": "pytest-19",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/unittest.py",
+      "src/_pytest/python.py",
+      "src/_pytest/runner.py",
+      "src/_pytest/config/__init__.py",
+      "src/_pytest/hookspec.py"
+    ],
+    "rank": 1,
+    "tool_calls": 5,
+    "prompt_tokens": 25945,
+    "completion_tokens": 753,
+    "latency_seconds": 8.821367399999872,
+    "error": null
+  },
+  {
+    "case_id": "pytest-20",
+    "repo": "pytest",
+    "strategy": "agent",
+    "predicted_paths": [],
+    "rank": null,
+    "tool_calls": 10,
+    "prompt_tokens": 280496,
+    "completion_tokens": 3141,
+    "latency_seconds": 21.62586439998995,
+    "error": "ValueError: no JSON object in response: 'Based on my investigation:\\n\\n- `src/_pytest/raises.py` contains the core implementation: `AbstractRaises._check_match` (regex/`match=` matching), `RaisesExc.matches`, `RaisesGroup.matches`, `_check'"
+  },
+  {
+    "case_id": "pytest-20",
+    "repo": "pytest",
+    "strategy": "rag",
+    "predicted_paths": [
+      "src/_pytest/raises.py",
+      "src/_pytest/_code/code.py",
+      "src/_pytest/skipping.py",
+      "src/_pytest/mark/structures.py",
+      "src/pytest/__init__.py"
+    ],
+    "rank": 1,
+    "tool_calls": 10,
+    "prompt_tokens": 187554,
+    "completion_tokens": 1684,
+    "latency_seconds": 16.85872799999197,
+    "error": null
+  }
+]
