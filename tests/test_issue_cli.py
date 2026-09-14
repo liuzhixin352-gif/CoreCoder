@@ -4883,8 +4883,7 @@ def test_request_tool_approval_accepts_approve(monkeypatch):
     )
 
     monkeypatch.setattr(
-        cli,
-        "pt_prompt",
+        "builtins.input",
         lambda prompt: "approve",
     )
 
@@ -4906,8 +4905,7 @@ def test_request_tool_approval_accepts_reject(monkeypatch):
     )
 
     monkeypatch.setattr(
-        cli,
-        "pt_prompt",
+        "builtins.input",
         lambda prompt: "reject",
     )
 
