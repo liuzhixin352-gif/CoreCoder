@@ -183,7 +183,7 @@ def _request_tool_approval(
     )
     console.print(f"  Arguments: {request.arguments}")
 
-    response = pt_prompt(
+    response = input(
         "Approve tool execution? [approve/reject] > "
     ).strip().lower()
 

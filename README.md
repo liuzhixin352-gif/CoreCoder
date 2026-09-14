@@ -37,6 +37,18 @@ CoreCoder started from a deliberately small coding-agent core. This fork extends
 | Model runtime | Capability-aware routing, transient fallback, streaming safety, budget-aware rerouting, role-specific model policies |
 | Evaluation | Reproducible evaluation and deterministic benchmark infrastructure covering success, latency, rounds, tool calls, tokens, and dollar cost |
 
+## Real-World Issue Repair Evaluation
+
+CoreCoder was smoke-tested on three historical GitHub issues from
+Flask, Requests, and pytest.
+
+All three selected cases achieved reproducible issue-level
+**Fail → Repair → Pass** validation on repository revisions before
+the corresponding official fixes.
+
+See the full evaluation evidence:
+[Real-World Issue Repair E2E Evaluation](benchmarks/real_issue_e2e/README.md)
+
 ## What this is
 
 CoreCoder is a coding-agent runtime built to make the difficult parts of agent engineering visible: not just the model/tool loop, but the safety, state, retrieval, observability, cost, routing, and recovery policies around it.
